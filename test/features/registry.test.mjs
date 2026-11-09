@@ -43,6 +43,29 @@ test('patch rows and package exports cover every feature row', async () => {
   }
 });
 
+test('row locale meta resolves through the package self-reference like the host reads it', async () => {
+  // dsh-app-boot's readPluginMeta resolves `<specifier>/locale/en.json` through
+  // the Node resolver (ERR_PACKAGE_PATH_NOT_EXPORTED = no meta = the detail page
+  // falls back to the raw module id as the row title). Resolve the same way and
+  // read every locale file in the directory, mirroring dictionariesOf.
+  const { createRequire } = await import('node:module');
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { dirname: dirnameOf } = await import('node:path');
+  const req = createRequire(join(here, '../../src/host/index.js'));
+  for (const name of ['capabilities', 'subagents', 'retry', 'processes']) {
+    const specifier = `dsh-agents-manager/${name}`;
+    const en = req.resolve(`${specifier}/locale/en.json`);
+    for (const file of readdirSync(dirnameOf(en))) {
+      if (!file.endsWith('.json')) continue;
+      const resolved = req.resolve(`${specifier}/locale/${file}`);
+      const meta = JSON.parse(readFileSync(resolved, 'utf8')).meta;
+      assert.equal(typeof meta?.title, 'string', `${name}/locale/${file} meta.title`);
+      assert.ok(meta.title.trim() !== '', `${name}/locale/${file} meta.title is non-empty`);
+      assert.equal(typeof meta?.description, 'string', `${name}/locale/${file} meta.description`);
+    }
+  }
+});
+
 test('registry: register, live contributions, unregister', () => {
   const registry = createFeatureRegistry();
   assert.deepEqual(registry.activeFeatures(), []);
