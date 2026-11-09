@@ -12,7 +12,7 @@ DeepSeek Harness (DSH) 插件：在设置页可视化 管理 **MCP 服务器**�
 | 自动重试 | 设置 → 自动重试（独立页） | 内核 per-provider 重试策略可视编辑（路由卡按厂商显示，热生效） · 14 组厂商预设规则一键导入（智谱/GLM 5h+周限额、Claude、Codex、OpenAI、Kimi、DeepSeek、Gemini、Cline、Factory、Antigravity、网关过载、中文中转站） · 正则+提取器自定义规则（7 种等待提取） · 规则测试抽屉（粘贴真实报错即时验证） · 进行中等待/最近事件监控（跨重启保留，含未重试失败及原因） · AI 工具三件套（读状态/试规则/写规则） |
 | 会话能力选择 | 输入框工具行 chip（仅会话开始前） | 按会话勾选 MCP/技能（默认全选） · 会话开始后自动隐藏 · Tab 分组 · 筛选 · 状态点（绿/红） · 悬停查看技能说明 · 全选/全不选 · 即时生效 |
 | 会话进程回显 | 会话顶部「进程」tab + `report_service_process` 工具 | AI 启动服务后回调上报（名称/端口/pid/回显） · 三层必掉（pre-execute 标记 → post-execute 一次性 notice 提醒 → jobs 事件自动登记/auto 徽标/手动接管） · 每会话独立面板 · 子代理上报自动归并到根会话（子代理徽标） · 进程回显展开查看 · URL 直达 · 一键停止（SIGTERM→SIGKILL） · 死进程自动标记已退出 |
-| 组件行开关 | 插件 → dsh-agents-manager 详情 → 包含的组件 | 四个独立组件行：核心（MCP+技能+会话选择） · 子代理 · 自动重试 · 进程回显——逐行启停，关闭即整块功能消失（无工具/无设置页/无引擎），DSH 原生行级 Switch，重启生效 |
+| 组件行开关 | 插件 → dsh-agents-manager 详情 → 包含的组件 | 五个独立组件行，每行都有中文名与功能说明：**核心骨架**（agent 绑定 + 共享 HTTP 路由，不可关） · **MCP 技能管理**（MCP 服务器 + 技能 + 会话能力选择） · **子代理管理** · **自动重试** · **进程看板**——逐行启停，关闭即整块功能消失（无工具/无设置页/无引擎/无 MCP 连接），DSH 原生行级 Switch，重启生效 |
 | 通用 | — | 中英双语文案（跟随宿主语言） · 明暗主题自适应（仅 `--dsw-alias-*` token） · 同源 HTTP API（`/agents-manager/api/v1`） |
 
 ## 功能
@@ -127,20 +127,27 @@ DeepSeek Harness (DSH) 插件：在设置页可视化 管理 **MCP 服务器**�
 ## 架构
 
 ```
-src/host/                 宿主半（Node，按功能分包）
-  index.js                组装根：store/supervisor/agent 集成、agent/created 每会话工具注册 + skill 守卫 + 子代理角色工具 + 重试工具、重试引擎/监控接线、启动自检、路由挂载
-  mcp/                    MCP 功能包
+src/host/                 宿主半（Node，按组件行分包——cordis.patch.yml 声明 5 行，详情页逐行 Switch 启停）
+  index.js                核心行（骨架，不可关）：agents-manager:core 服务（功能注册表、能力接缝 mountCapabilities、委派接缝、re-sync 钩子）、
+                         agent/created 每会话工具注册（MCP 工具经能力接缝 + 各行功能工具 + skill 守卫）、共享 HTTP 路由挂载
+  features/               四个功能行（各自注入 agents-manager:core，独立启停）
+    capabilities.js       「MCP 技能管理」行：MCP supervisor/配置主存储、技能后端、会话选择、子代理能力预约、启动自检
+    subagents.js          「子代理管理」行：角色 store + delegate_<role> 工具注册 + /subagents 路由服务
+    retry.js              「自动重试」行：规则 store + 引擎 prepend 监听 + 监控 + AI 三工具 + /retry 路由服务
+    processes.js          「进程看板」行：进程注册表 + report_service_process 工具 + 三层必掉 + jobs 桥 + /session/processes 路由服务
+    registry.js           功能注册表：toolDefinitions/apiServices/contributions 聚合，/state.features 的数据源
+  mcp/                    MCP 功能包（capabilities 行消费）
     config.js             mcpServers JSON 读取/校验/粘贴解析（含 zcode/codex 别名归一）；dsh 工具命名契约
     store.js              配置主存储：DSH 统一存储（storageDomain 域）→ ~/.dsh 插件文件兜底；~/.agents/mcp.json 一次性迁移
     supervisor.js         连接池（@modelcontextprotocol/client）、工具发现、测试连接、调用桥接
     agent-sources.js      一键同步：Claude Code / Codex(TOML) / zcode / Cursor 配置探测解析（跨平台 home 路径）
-  skills/                 技能功能包
+  skills/                 技能功能包（capabilities 行消费）
     store.js              ~/.agents/skills 扫描、SKILL.md frontmatter 解析、受版本校验的文件读写
     installer.js          GitHub 技能安装：路径解析、tar.gz 下载解析、技能目录识别与复制
-  subagents/              子代理角色功能包
+  subagents/              子代理角色功能包（subagents 行消费）
     store.js              角色主存储：DSH 统一存储（独立域 agents_manager_subagents）→ ~/.dsh 插件文件兜底；角色/候选模型校验
     router.js             角色 → delegate_<role> 工具：schema（model 枚举 + 自定义描述）、startActivation 调用、结果/失败报告映射
-  retry/                  自动重试功能包
+  retry/                  自动重试功能包（retry 行消费）
     extractors.js         7 种等待提取器（正则语法移植自 magpie/hermes-agent/codex 等生产实现）
     presets.js            14 组厂商预设（智谱/Z.ai/Claude/Codex/OpenAI/Kimi/DeepSeek/Gemini/Cline/Factory/Antigravity/网关过载/中转站）
     rules.js              规则校验（正则可编译/组越界/码集合/clamp 边界）+ 匹配求值（首命中）
@@ -149,15 +156,16 @@ src/host/                 宿主半（Node，按功能分包）
     monitor.js            session/event + 引擎 miss 上报 → 进行中等待（倒计时）+ 最近事件环形缓冲（100 条：重试行 + 未重试失败行，跨重启持久化到 ~/.dsh/agents-manager/monitor.json）
     manager.js            provider 重试策略读写（ctx.settings.mutate 热生效）+ 内核策略校验镜像 + 路由→厂商标签推导（vendors/modelCount，10s TTL 缓存）
     tools.js              AI 三工具：read_retry_state / test_retry_rule / write_retry_rules
-  session/                会话功能包
+  session/                会话功能包（capabilities/processes 行消费）
     selection.js          每会话 MCP/技能选择状态（内存，随会话消失）
     pending-capabilities.js  委派角色→子代理的能力预约（单次消费、60s TTL；角色白名单∩会话选择）
     processes.js          会话服务进程注册表（内存，按根会话）+ 子代理→根会话解析器；存活探测与 SIGTERM→SIGKILL 停止；source auto/手动接管语义
     process-tools.js      report_service_process 回调工具（AI 启动服务后上报端口/pid/回显；成功回调消费 service-detect 标记）
     service-detect.js     三层必掉：服务启动启发式 + pending 表 + pre/post-execute 监听（标记→一次性 notice 提醒）
-  http/                   对外接口
-    api.js                HTTP JSON API（/agents-manager/api/v1，含 /retry/* 五条路由与 /session/processes* 两条）
-client/client.js          浏览器半（手写 CJS factory，无构建）：三个设置页（「MCP 和技能」双 Tab、「子代理」页、「自动重试」页：策略卡/规则编辑+测试抽屉/预设导入/监控）、Markdown 预览、树形技能编辑、chip 弹层 + 活跃会话探针、会话「进程」视图 tab、通知
+  http/                   对外接口（核心行挂载，服务来自各行 apiServices 聚合；行关则对应路由 501）
+    api.js                HTTP JSON API（/agents-manager/api/v1，含 /mcp/* /skills/* /session/selection /session/processes* /subagents* /retry/*）
+locale/<row>/{zh,en}.json 各功能行的详情页显示名与说明（meta.title/meta.description，DSH readPluginMeta 读取）
+client/client.js          浏览器半（手写 CJS factory，无构建）：三个设置页（「MCP 和技能」双 Tab、「子代理」页、「自动重试」页：策略卡/规则编辑+测试抽屉/预设导入/监控）、Markdown 预览、树形技能编辑、chip 弹层 + 活跃会话探针、会话「进程」视图 tab、通知；/state.features 按行隐藏对应 UI
 test/                     测试镜像同结构（node --test 'test/**/*.test.mjs'），fixtures/echo-server.mjs 为手写 stdio MCP 测试服务器
 ```
 

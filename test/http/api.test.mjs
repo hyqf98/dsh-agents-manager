@@ -121,7 +121,7 @@ function makeServices(skillsRoot) {
     store,
     supervisor,
     skillsRoot,
-    skillsStore,
+    skillsStoreModule: skillsStore,
     selectionStore,
     listSkills: async () => [{ dir: 'alpha', name: 'Alpha', description: 'd', hasSkillMd: true, fileCount: 1 }],
     onSelectionChanged: undefined,
@@ -159,7 +159,7 @@ test('GET /state serves store servers, pool, skills, and store metadata', async 
     assert.equal(res.statusCode, 200);
     // The features list drives the client's per-row UI gating; the stub
     // passes no features fn so the handler answers its full default set.
-    assert.deepEqual(res.sent.features, ['mcp', 'subagents', 'retry', 'processes']);
+    assert.deepEqual(res.sent.features, ['capabilities', 'subagents', 'retry', 'processes']);
     assert.equal(res.sent.ok, true);
     assert.ok(res.sent.servers.good);
     assert.equal(res.sent.pool.bad.state, 'failed');

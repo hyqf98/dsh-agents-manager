@@ -1,13 +1,17 @@
 # dsh-agents-manager bundle rows for DeepSeek Harness (dsh).
 #
-# Four loader rows: the core (MCP + skills + session selection + the HTTP
-# API + the agents-manager:core service) plus one row per optional
-# capability. Toggle each row from 插件 → dsh-agents-manager 详情 → 包含的组件;
-# a disabled row disappears entirely (no tools, no settings page, no
-# engine), and /state.features tells the client which UI to render.
+# Five loader rows: the core skeleton (agent binding + the shared HTTP route
+# + the agents-manager:core service) plus one row per user-facing capability.
+# Toggle each row from 插件 → dsh-agents-manager 详情 → 包含的组件; a disabled
+# row disappears entirely (no tools, no settings page, no engine), and
+# /state.features tells the client which UI to render. Row display names come
+# from each row module's locale/*/json meta (see src/host/features/).
 - insert:
     - id: agents-manager
       name: "dsh-agents-manager"
+      config: {}
+    - id: agents-manager-capabilities
+      name: "dsh-agents-manager/capabilities"
       config: {}
     - id: agents-manager-subagents
       name: "dsh-agents-manager/subagents"

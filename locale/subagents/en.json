@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Subagent Management",
+    "description": "Delegation roles (delegate_<role>) and model-pool chains, the \"Subagents\" settings page, per-call model selection."
+  }
+}

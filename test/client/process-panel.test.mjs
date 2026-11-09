@@ -72,7 +72,7 @@ function fixture(t, options = {}) {
       if (href.includes('/session/processes?')) return reply(procsReply);
       if (href.includes('/session/fresh?')) return reply({ fresh: true });
       // /state answers with every feature row so apply() seats the tab.
-      return reply({ ok: true, servers: {}, skills: [], pool: {}, features: ['mcp', 'subagents', 'retry', 'processes'] });
+      return reply({ ok: true, servers: {}, skills: [], pool: {}, features: ['capabilities', 'subagents', 'retry', 'processes'] });
     },
     setInterval(fn, ms) { intervals.set(++nextTimer, { fn, ms }); return nextTimer; },
     clearInterval(id) { intervals.delete(id); },
@@ -86,13 +86,13 @@ function fixture(t, options = {}) {
     slots: {
       inject: (_key, effect) => effect(),
       register(meta, component) {
-        if (meta.name === 'conversation.input.left') Entry = component;
+        if (meta.name === 'conversation.input.left' && meta.id === 'agents-manager-probe') Entry = component;
         if (meta.name === 'conversation.view' && meta.id === 'agents-manager-processes') View = component;
       },
     },
   });
   // apply() seats every surface after the /state feature fetch resolves:
-  // the composer probe (mcp core) and the「进程」tab (processes row).
+  // the composer probe (capabilities/processes rows) and the「进程」tab.
   async function seatSettles() {
     for (let spin = 0; spin < 40 && (Entry === undefined || View === undefined); spin += 1) {
       await Promise.resolve();
@@ -102,7 +102,7 @@ function fixture(t, options = {}) {
 
   async function render(entryProps = {}) {
     await seatSettles();
-    assert.equal(typeof Entry, 'function', 'the composer probe seats for the mcp core');
+    assert.equal(typeof Entry, 'function', 'the composer probe seats for the capabilities/processes rows');
     assert.equal(typeof View, 'function', 'the process tab seats for the processes feature');
     await act(async () => {
       const element = React.createElement('div', null,

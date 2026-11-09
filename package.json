@@ -1,7 +1,7 @@
 {
   "name": "dsh-agents-manager",
-  "version": "0.4.0",
-  "description": "AI enhancement plugin for DeepSeek Harness (settings page shown as \"MCP & Skills\"): visual management of MCP servers, Skills, subagent roles & model pools, automatic model-request retry (provider policies + vendor-expression rules + cross-restart monitor), and per-session service-process panels — settings pages, ~/.agents config, MCP testing, tools & per-card enable toggles, skill editing, delegation roles with per-call model selection, and the report_service_process callback tool.",
+  "version": "0.5.0",
+  "description": "AI enhancement plugin for DeepSeek Harness, split into five toggleable bundle rows (插件详情页逐行启停，每行带中文名): core skeleton + MCP & skills management (MCP servers, skills, per-session capability selection, settings pages, testing) + subagent roles & model pools + automatic model-request retry (provider policies, vendor-expression rules, cross-restart monitor) + per-session process panel with auto-detection and report_service_process.",
   "license": "MIT",
   "keywords": [
     "dsh",
@@ -17,9 +17,18 @@
   "exports": {
     ".": "./src/host/index.js",
     "./client": "./client/client.js",
+    "./capabilities": "./src/host/features/capabilities.js",
     "./subagents": "./src/host/features/subagents.js",
     "./retry": "./src/host/features/retry.js",
     "./processes": "./src/host/features/processes.js",
+    "./capabilities/locale/*.json": "./locale/capabilities/*.json",
+    "./subagents/locale/*.json": "./locale/subagents/*.json",
+    "./retry/locale/*.json": "./locale/retry/*.json",
+    "./processes/locale/*.json": "./locale/processes/*.json",
+    "./capabilities/icon": "./icon.svg",
+    "./subagents/icon": "./icon.svg",
+    "./retry/icon": "./icon.svg",
+    "./processes/icon": "./icon.svg",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./package.json": "./package.json"

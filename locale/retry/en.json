@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Auto Retry",
+    "description": "Automatic model-request retry: provider policies + vendor-expression rules + cross-restart monitor, the read_retry_state tool trio, the \"Auto Retry\" settings page."
+  }
+}

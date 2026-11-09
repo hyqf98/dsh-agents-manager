@@ -1,33 +1,22 @@
 /**
- * Host entry for dsh-agents-manager — the CORE row.
+ * Host entry for dsh-agents-manager — the CORE row (骨架).
  *
- * Composition:
- *  - one MCP supervisor over the managed MCP config (startup auto-test =
- *    initial pool sync; failures surface through /state for the client's
- *    toasts);
- *  - one HTTP prefix route (/agents-manager/api/v1) the browser half calls;
- *  - the `agents-manager:core` service the bundle's optional feature rows
- *    (subagents / retry / processes) inject: shared stores, the agent
- *    binding loop, the HTTP service merge, and the feature registry that
- *    drives /state.features (the client hides each disabled feature's UI);
- *  - per-agent tool registration: MCP tools for the servers its session
- *    selected plus feature tools from every live feature row, and a guard
- *    that denies `skill` loads for skills the session deselected.
+ * The core owns only what every feature row shares:
+ *  - the agent-binding loop: per-agent tool registration (MCP tools through
+ *    the capabilities row's seam + feature tools from every live row) and
+ *    the skill-selection guard;
+ *  - one HTTP prefix route (/agents-manager/api/v1) the browser half calls,
+ *    whose services merge every live feature row's apiServices();
+ *  - the `agents-manager:core` service the feature rows inject: the feature
+ *    registry driving /state.features, the capabilities seam mount, the
+ *    delegation seam, and the shared re-sync hooks.
  *
- * Feature rows live in src/host/features/ and load as their own cordis
- * entries (see cordis.patch.yml); this core never imports them.
+ * Feature rows live in src/host/features/ and load as their own cordis rows
+ * (see cordis.patch.yml): capabilities (MCP + skills + session selection),
+ * subagents, retry, processes. This core never imports them.
  *
  * @module
  */
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { createSupervisor } from './mcp/supervisor.js';
-import { createMcpStore } from './mcp/store.js';
-import * as skillsStore from './skills/store.js';
-import { createSelectionStore } from './session/selection.js';
-import { createPendingCapabilities } from './session/pending-capabilities.js';
-import { detectAgentSources } from './mcp/agent-sources.js';
-import { installFromGithub } from './skills/installer.js';
 import { createFeatureRegistry } from './features/registry.js';
 import { createHandler, API_BASE } from './http/api.js';
 
@@ -56,39 +45,24 @@ function sessionIdOf(agent) {
  * @returns {void}
  */
 export function apply(ctx) {
-  const agentsRoot = join(homedir(), '.agents');
-  const skillsRoot = join(agentsRoot, 'skills');
-
-  const supervisor = createSupervisor();
-  const selectionStore = createSelectionStore();
   const features = createFeatureRegistry();
 
   /**
-   * Capability reservations a `delegate_<role>` call leaves for the child it
-   * spawns: consumed by bindAgent when the child's agent/created fires, so a
-   * role can pin the child's MCP/skill selection regardless of what the
-   * delegating session itself selected.
+   * The capabilities seam: MCP supervisor + config store + skills backend +
+   * per-session selection + delegation reservations, supplied live by the
+   * capabilities feature row through core.mountCapabilities. Null while that
+   * row is disabled — then no MCP tool registers, no skill guard applies,
+   * and the HTTP mcp/skills/selection routes answer 501.
+   *
+   * @type {object | null}
    */
-  const pendingCapabilities = createPendingCapabilities();
+  let caps = null;
 
   /**
    * The subagents seam the delegation tools call, resolved by the subagents
    * feature row once the seam composes (this core never imports it).
    */
   let subagentsService;
-
-  /**
-   * The primary MCP configuration store: the DSH unified storage when its
-   * domain form is composed (this deployment has it), a plugin-owned file
-   * under ~/.dsh otherwise. ~/.agents/mcp.json stays a read-only import
-   * source that the store migrates once when the primary store is empty.
-   */
-  const store = createMcpStore({
-    // Lazy on purpose: activation order is not guaranteed, so the store retries
-    // this briefly before falling back to the plugin-owned ~/.dsh file.
-    resolveStorageDomain: () => serviceOf(ctx, 'storageDomain') ?? null,
-    log: (message) => { try { ctx.logger?.warn?.(message); } catch { /* logging is optional */ } },
-  });
 
   /**
    * Live per-agent registration state: agent → { sync(), dispose() } where
@@ -99,38 +73,14 @@ export function apply(ctx) {
    */
   const agentBindings = new Map();
 
-  /** Current server snapshot read through the store. */
-  let currentServers = {};
-
-  /**
-   * Re-read the managed servers through the store.
-   *
-   * @returns {Promise<Record<string, object>>}
-   */
-  async function loadServers() {
-    currentServers = await store.listServers();
-    return currentServers;
-  }
-
-  /**
-   * The skills listing /state serves: the filesystem scan of ~/.agents/skills,
-   * which is the same directory the harness skill provider loads.
-   *
-   * @returns {Promise<Array<object>>}
-   */
-  async function listSkills() {
-    const result = await skillsStore.listSkills(skillsRoot);
-    if (!result.ok) return [];
-    return result.skills;
-  }
-
   /**
    * Build (or rebuild) one agent's scoped registrations: MCP tools for every
-   * enabled-and-selected connected server, the skill-selection guard, and
-   * the feature rows' contributions (delegate tools, retry tools, the
-   * process report tool, service-detect listeners). Registrations land on
-   * the agent's own layer and are disposed with it; we keep the disposers
-   * ourselves as well so plugin unload also removes them.
+   * enabled-and-selected connected server (capabilities row), the
+   * skill-selection guard, and the feature rows' contributions (delegate
+   * tools, retry tools, the process report tool, service-detect listeners).
+   * Registrations land on the agent's own layer and are disposed with it;
+   * we keep the disposers ourselves as well so plugin unload also removes
+   * them.
    *
    * @param {object} agent - live Agent handle from agent/created.
    */
@@ -146,16 +96,18 @@ export function apply(ctx) {
      * once, so a resumed or re-created child with the same id falls back to
      * the session selection rather than a stale role pin.
      *
-     * @type {{ mcp: string[] | null, skills: string[] | null }}
+     * @type {{ mcp: string[] | null, skills: string[] | null } | null}
      */
     let effectiveSelection = null;
-    try {
-      const header = agent?.session?.header;
-      const reserved = header?.origin === 'subagent' && typeof header?.parentSession === 'string'
-        ? pendingCapabilities.consume(String(header.parentSession))
-        : null;
-      if (reserved !== null) effectiveSelection = reserved;
-    } catch { /* reservation handling is best-effort; the session selection stands */ }
+    if (caps !== null) {
+      try {
+        const header = agent?.session?.header;
+        const reserved = header?.origin === 'subagent' && typeof header?.parentSession === 'string'
+          ? caps.pendingCapabilities.consume(String(header.parentSession))
+          : null;
+        if (reserved !== null) effectiveSelection = reserved;
+      } catch { /* reservation handling is best-effort; the session selection stands */ }
+    }
 
     /**
      * Does this session's selection enable one MCP server? A child with a
@@ -168,7 +120,8 @@ export function apply(ctx) {
       if (effectiveSelection !== null) {
         return effectiveSelection.mcp === null || effectiveSelection.mcp.includes(name);
       }
-      return selectionStore.mcpEnabled(sessionId, name);
+      if (caps === null) return false; // unreachable: no MCP tools without the row
+      return caps.selectionStore.mcpEnabled(sessionId, name);
     }
 
     /**
@@ -181,7 +134,8 @@ export function apply(ctx) {
       if (effectiveSelection !== null) {
         return effectiveSelection.skills === null || effectiveSelection.skills.includes(name);
       }
-      return selectionStore.skillEnabled(sessionId, name);
+      if (caps === null) return true;
+      return caps.selectionStore.skillEnabled(sessionId, name);
     }
 
     /** Disposers owned by the agent binding (registrations + agent effect). */
@@ -219,29 +173,32 @@ export function apply(ctx) {
 
     /** The registration body, extracted so sync() can guard it whole. @param {object} tools */
     function syncRegistrations(tools) {
-      // MCP tools: every enabled-and-selected connected server.
-      for (const [name, server] of Object.entries(currentServers)) {
-        if (server.enabled === false) continue;
-        if (!mcpSelected(name)) continue;
-        for (const definition of supervisor.definitionsFor(name)) {
-          try {
-            registrationDisposers.push(tools.register(definition));
-          } catch (error) {
-            ctx.logger?.warn?.(`agents-manager: tool registration failed for ${definition.name}: ${error instanceof Error ? error.message : String(error)}`);
+      // MCP tools (capabilities row only): every enabled-and-selected
+      // connected server.
+      if (caps !== null) {
+        for (const [name, server] of Object.entries(caps.servers())) {
+          if (server.enabled === false) continue;
+          if (!mcpSelected(name)) continue;
+          for (const definition of caps.supervisor.definitionsFor(name)) {
+            try {
+              registrationDisposers.push(tools.register(definition));
+            } catch (error) {
+              ctx.logger?.warn?.(`agents-manager: tool registration failed for ${definition.name}: ${error instanceof Error ? error.message : String(error)}`);
+            }
           }
         }
-      }
 
-      // The skill-selection guard.
-      try {
-        registrationDisposers.push(tools.guard((exec) => {
-          if (exec?.name !== 'skill') return undefined;
-          const requested = exec.arguments?.name;
-          if (typeof requested !== 'string' || requested === '') return undefined;
-          if (skillSelected(requested)) return undefined;
-          return `Skill "${requested}" is disabled for this session — enable it in the composer capability selector.`;
-        }));
-      } catch { /* a composition without guards keeps MCP tools working */ }
+        // The skill-selection guard (same row: without it every skill loads).
+        try {
+          registrationDisposers.push(tools.guard((exec) => {
+            if (exec?.name !== 'skill') return undefined;
+            const requested = exec.arguments?.name;
+            if (typeof requested !== 'string' || requested === '') return undefined;
+            if (skillSelected(requested)) return undefined;
+            return `Skill "${requested}" is disabled for this session — enable it in the composer capability selector.`;
+          }));
+        } catch { /* a composition without guards keeps MCP tools working */ }
+      }
 
       // Feature rows: tool definitions (delegate tools, retry trio) plus the
       // processes row's per-agent hooks (report tool + detect listeners).
@@ -260,7 +217,7 @@ export function apply(ctx) {
       // The processes row's per-agent service-detect listeners (layers 1-2)
       // and any other contribution-carried tools (the report tool rides
       // contributions() because it pairs with the detect hooks).
-      for (const contribution of features.contributions()) {
+      for (const contribution of coreServiceFeatures().contributions()) {
         for (const definition of (contribution?.tools ?? [])) {
           try {
             if (typeof tools.get === 'function' && tools.get(definition.name) !== undefined) {
@@ -333,11 +290,6 @@ export function apply(ctx) {
     }
   }
 
-  // Pool changes (connections settled, snapshots replaced) re-register tools.
-  const offPoolChange = supervisor.onChange(() => {
-    syncAllAgents();
-  });
-
   // Agent lifecycle: bind tools when agents appear, forget them when they go.
   const offCreated = ctx.on('agent/created', (payload) => {
     try {
@@ -353,29 +305,13 @@ export function apply(ctx) {
       agentBindings.delete(payload?.agent);
     }
     const sessionId = sessionIdOf(payload?.agent);
-    if (sessionId !== '') {
-      selectionStore.clear(sessionId);
+    if (sessionId !== '' && caps !== null) {
+      caps.selectionStore.clear(sessionId);
       // A disposed delegating parent will never spawn its reserved child;
       // drop the reservation so it cannot leak onto a later one.
-      pendingCapabilities.disposeParent(sessionId);
+      caps.pendingCapabilities.disposeParent(sessionId);
     }
   });
-
-  // Selection changes re-register only the affected session's agent.
-  const offSelection = selectionStore.onChange((sessionId) => {
-    syncAgentForSession(sessionId);
-  });
-
-  // Startup: open the store (one-shot ~/.agents migration included), then the
-  // initial pool sync — which IS the startup auto-test; failures land in
-  // supervisor.status() where /state (and the client's toasts) read them.
-  store.init()
-    .then(() => loadServers())
-    .then((servers) => supervisor.sync(servers))
-    .then(() => syncAllAgents())
-    .catch((error) => {
-      ctx.logger?.warn?.(`agents-manager: startup failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
 
   /**
    * The LLM catalog the settings page offers in its model pickers: registered
@@ -421,6 +357,24 @@ export function apply(ctx) {
   /** @type {Map<string, object>} */
   const featureBundles = new Map();
 
+  /**
+   * The features face exposed on the core service (see ctx.provide below);
+   * hoisted so syncRegistrations can read raw contribution bundles.
+   */
+  function coreServiceFeatures() {
+    /** @type {Array<object>} */
+    const out = [];
+    for (const id of features.activeFeatures()) {
+      const bundle = featureBundles.get(id);
+      if (bundle?.contributions !== undefined) {
+        try {
+          out.push(bundle.contributions());
+        } catch { /* a broken feature never breaks binding sync */ }
+      }
+    }
+    return out;
+  }
+
   ctx.provide('agents-manager:core', {
     /** The shared feature registry, with raw contribution bundles reachable. */
     features: {
@@ -439,24 +393,24 @@ export function apply(ctx) {
        *
        * @returns {Array<object>}
        */
-      contributions() {
-        /** @type {Array<object>} */
-        const out = [];
-        for (const id of features.activeFeatures()) {
-          const bundle = featureBundles.get(id);
-          if (bundle?.contributions !== undefined) {
-            try {
-              out.push(bundle.contributions());
-            } catch { /* a broken feature never breaks binding sync */ }
-          }
-        }
-        return out;
-      },
+      contributions: coreServiceFeatures,
     },
     /** Service resolution against the core context (storageDomain/jobs/llm/...). */
     serviceOf: (name) => serviceOf(ctx, name),
     /** Re-run every live agent's registration sync. */
     syncAllAgents,
+    /** Re-sync one session's agent after a selection change. */
+    syncAgentForSession,
+    /**
+     * Mount (or unmount with null) the capabilities seam: the MCP
+     * supervisor/store, skills backend, and session selection handles the
+     * core's agent binding consults live on every sync.
+     *
+     * @param {object | null} seam
+     */
+    mountCapabilities: (seam) => { caps = seam; },
+    /** Live capabilities seam, or null while that row is disabled. */
+    capabilities: () => caps,
     /** The delegation seam handle (set by the subagents row when composed). */
     setSubagentsService: (service) => { subagentsService = service; },
     subagentsComposed: () => subagentsService !== undefined,
@@ -464,10 +418,17 @@ export function apply(ctx) {
     delegationServices: () => ({
       get subagents() { return subagentsService; },
       get llm() { return serviceOf(ctx, 'llm'); },
-      get delegateCapabilities() { return (parentSessionId, selection) => pendingCapabilities.reserve(parentSessionId, selection); },
-      get sessionSelection() { return (sessionId) => selectionStore.get(sessionId); },
-      get sessionMcpEnabled() { return () => Object.entries(currentServers).filter(([, server]) => server.enabled !== false).map(([name]) => name).sort(); },
-      get sessionSkillsEnabled() { return () => skillsStore.listSkills(skillsRoot).then((result) => (result.ok ? result.skills.map((skill) => skill.name) : [])); },
+      get delegateCapabilities() {
+        const pending = caps?.pendingCapabilities;
+        return pending === undefined ? undefined : (parentSessionId, selection) => pending.reserve(parentSessionId, selection);
+      },
+      get sessionSelection() { return caps === null ? undefined : (sessionId) => caps.selectionStore.get(sessionId); },
+      get sessionMcpEnabled() {
+        return caps === null ? undefined : () => Object.entries(caps.servers()).filter(([, server]) => server.enabled !== false).map(([name]) => name).sort();
+      },
+      get sessionSkillsEnabled() {
+        return caps === null ? undefined : () => caps.listSkills().then((list) => list.map((skill) => skill.name));
+      },
     }),
     /** The model catalog for the role editor's pickers. */
     listLlmCatalog,
@@ -480,16 +441,16 @@ export function apply(ctx) {
    * this host check vetoes what only the live registry knows: a subagent
    * conversation (tools fixed at spawn) and a live session that already has
    * turns. "Has turns" follows the same semantics as the official
-   * sessionListMetadata blank fold — a turn/start event exists — instead of
-   * the event count: a web-built new session can already carry non-turn
-   * events (e.g. an auto title) before its first message, so `seq === 0`
-   * misjudged genuinely fresh sessions as started and hid their chip
-   * forever. This veto is a safe subset of the client's authoritative
-   * gate: the host only says fresh=false when the official fold would
-   * agree, and anything else stays true for the client to decide.
-   * A Session unknown to the live registry returns fresh=true: the host
-   * cannot distinguish a fresh blank shell from not-yet-materialized
-   * history, and the client's summary gate owns that distinction.
+   * sessionListMetadata blank fold — a turn/start event exists — instead of the
+   * event count: a web-built new session can already carry non-turn events
+   * (e.g. an auto title) before its first message, so `seq === 0` misjudged
+   * genuinely fresh sessions as started and hid their chip forever. This veto
+   * is a safe subset of the client's authoritative gate: the host only says
+   * fresh=false when the official fold would agree, and anything else stays
+   * true for the client to decide. A Session unknown to the live registry
+   * returns fresh=true: the host cannot distinguish a fresh blank shell from
+   * not-yet-materialized history, and the client's summary gate owns that
+   * distinction.
    *
    * @param {string} sessionId
    * @returns {boolean}
@@ -517,19 +478,13 @@ export function apply(ctx) {
   /**
    * The HTTP API the settings page and composer selector talk to: core
    * services merged with every live feature row's apiServices() at request
-   * assembly time, so feature routes live or die with their row.
+   * assembly time, so feature routes live or die with their row (the MCP /
+   * skills / selection services arrive through the capabilities row's
+   * apiServices; without that row the shared /state still answers, with the
+   * capabilities surfaces empty and the mcp/skills routes 501).
    */
   function handlerServices() {
     return {
-      store,
-      supervisor,
-      skillsRoot,
-      skillsStore,
-      selectionStore,
-      listSkills,
-      onSelectionChanged: (sessionId) => syncAgentForSession(sessionId),
-      detectAgentSources: () => detectAgentSources({ knownServers: () => store.listServers() }),
-      installSkillFromGithub: (source) => installFromGithub({ source, skillsRoot }),
       listLlmCatalog,
       sessionFresh,
       features: () => features.activeFeatures(),
@@ -563,18 +518,15 @@ export function apply(ctx) {
     mountRoutes(ctx);
   }
 
-  // Plugin teardown: stop connections, drop listeners, unbind agents, close the store.
+  // Plugin teardown: drop listeners and unbind agents. The stores,
+  // supervisors, and reservations belong to their feature rows and are
+  // disposed there.
   try {
     ctx.effect(() => () => {
-      offPoolChange();
       offCreated();
       offDisposed();
-      offSelection();
       for (const binding of [...agentBindings.values()]) binding.dispose();
       agentBindings.clear();
-      void supervisor.dispose();
-      void store.dispose();
-      pendingCapabilities.dispose();
     }, 'agents-manager: teardown');
   } catch { /* a context without effects cannot own cleanup */ }
 }

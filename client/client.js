@@ -4946,8 +4946,9 @@ window.__ModuleLoader__.load({
 			}
 
 			/**
-			 * Which feature rows the Host actually loaded ('mcp' is this bundle's
-			 * core and always present). Fetched before seating any UI. A FAILED
+			 * Which feature rows the Host actually loaded (the core row is this
+			 * bundle's skeleton and always present; 'capabilities' covers MCP +
+			 * skills + session selection). Fetched before seating any UI. A FAILED
 			 * fetch (network error / non-OK) retries with backoff — seating
 			 * everything on a transient error would permanently show menus for
 			 * rows the user switched off. Only an explicit feature list from a
@@ -4969,7 +4970,7 @@ window.__ModuleLoader__.load({
 						if (response.ok) {
 							// Healthy Host, no features field: legacy Host composes
 							// every row — seat everything.
-							seat({ mcp: true, subagents: true, retry: true, processes: true });
+							seat({ capabilities: true, subagents: true, retry: true, processes: true });
 							return;
 						}
 						retry();
@@ -4979,7 +4980,7 @@ window.__ModuleLoader__.load({
 					if (attempt >= delays.length - 1) {
 						// Host unreachable for ~10s: assume the worst case the
 						// user notices (a missing menu reloads the page anyway).
-						seat({ mcp: true, subagents: true, retry: true, processes: true });
+						seat({ capabilities: true, subagents: true, retry: true, processes: true });
 						return;
 					}
 					attempt += 1;
@@ -4990,8 +4991,32 @@ window.__ModuleLoader__.load({
 			}
 
 			seatByFeatures(function (on) {
-				// Core settings page「MCP 和技能」(MCP manager + Skills editor).
-				if (on.mcp !== false) {
+				// The invisible active-session probe rides the composer seat
+				// whenever any consumer needs it: the capability chip
+				// (capabilities row) or the「进程」tab (processes row).
+				if (on.capabilities === true || on.processes === true) {
+					try {
+						ctx.slots.inject(COMPOSER_LEFT, function () {
+							return ctx.slots.register({
+								name: COMPOSER_LEFT,
+								id: "agents-manager-probe",
+								order: 39,
+								label: function () { return t("session.title"); }
+							}, function (props) {
+								var sessionId = props.sessionId;
+								var hasId = sessionId !== undefined && sessionId !== null && String(sessionId) !== "";
+								return hasId ? h(ActiveSessionProbe, { sessionId: String(sessionId) }) : null;
+							});
+						});
+					} catch (error) {
+						try { console.error("[" + NS + "] active-session probe registration failed", error); } catch (ignored) { }
+					}
+				}
+
+				// Capabilities surfaces「MCP 和技能」settings page, the composer
+				// capability chip, and the MCP startup-failure toasts (own row:
+				// hidden when the row is off).
+				if (on.capabilities === true) {
 					try {
 						ctx.slots.inject(SETTINGS_SECTION, function () {
 							return ctx.slots.register({
@@ -5007,9 +5032,9 @@ window.__ModuleLoader__.load({
 						try { console.error("[" + NS + "] settings page registration failed", error); } catch (ignored) { }
 					}
 
-					// Composer capability chip (session-scoped seat). The same seat also
-					// mounts the invisible active-session probe that drives the process
-					// tab below.
+					// Composer capability chip (session-scoped seat; the probe
+					// above is separate so the processes row keeps working with
+					// this row off).
 					try {
 						ctx.slots.inject(COMPOSER_LEFT, function () {
 							return ctx.slots.register({
@@ -5019,16 +5044,9 @@ window.__ModuleLoader__.load({
 								label: function () { return t("session.title"); }
 							}, function (props) {
 								// Session-scoped seats supply these hooks after the official
-								// adapter is ready. Missing hooks never authorize selection;
-								// the probe only needs the session id.
-								var sessionId = props.sessionId;
-								var hasId = sessionId !== undefined && sessionId !== null && String(sessionId) !== "";
-								var probe = hasId ? h(ActiveSessionProbe, { sessionId: String(sessionId) }) : null;
-								if (!hasId || typeof props.useSession !== "function" || typeof props.useProjection !== "function") return probe;
-								return h(React.Fragment, null,
-									probe,
-									h(SessionChipGate, Object.assign({ t: t, subscribeLocale: subscribeLocale }, props, { key: String(props.sessionId) }))
-								);
+								// adapter is ready. Missing hooks never authorize selection.
+								if (typeof props.useSession !== "function" || typeof props.useProjection !== "function") return null;
+								return h(SessionChipGate, Object.assign({ t: t, subscribeLocale: subscribeLocale }, props, { key: String(props.sessionId) }));
 							});
 						});
 					} catch (error) {

@@ -75,7 +75,7 @@ async function fixture(t, options = {}) {
       requests.push(url);
       if (url.includes('/session/fresh?')) return options.fresh ? options.fresh(url) : reply({ fresh: true });
       if (url.includes('/session/selection?')) return reply({ selection: { mcp: null, skills: null } });
-      return reply({ servers: {}, skills: [], pool: {}, features: ['mcp', 'subagents', 'retry', 'processes'] });
+      return reply({ servers: {}, skills: [], pool: {}, features: ['capabilities', 'subagents', 'retry', 'processes'] });
     },
     setInterval(fn, ms) { intervals.set(++nextTimer, { fn, ms }); return nextTimer; },
     clearInterval(id) { intervals.delete(id); },

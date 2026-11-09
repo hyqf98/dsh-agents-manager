@@ -25,13 +25,20 @@ export const MAX_BODY_BYTES = 512 * 1024;
 /**
  * Build the route handler around its collaborators so tests drive stubs.
  *
+ * The capabilities services (store / supervisor / skillsRoot / skillsStore /
+ * selectionStore / listSkills / detectAgentSources / installSkillFromGithub)
+ * arrive through the capabilities feature row's apiServices(); without that
+ * row the mcp/skills/selection routes answer 501 and /state degrades to its
+ * capabilities-empty shape. The subagents and retry services likewise ride
+ * their own rows.
+ *
  * @param {object} services
- * @param {object} services.store - MCP server store (primary DSH storage).
- * @param {object} services.supervisor - MCP supervisor handle.
- * @param {string} services.skillsRoot - absolute ~/.agents/skills path.
- * @param {object} services.skillsStore - skills-store module (injected for tests).
- * @param {object} services.selectionStore - session selection store.
- * @param {() => Promise<Array<object>>} services.listSkills - skill listing (host may cache).
+ * @param {object} [services.store] - MCP server store (capabilities row).
+ * @param {object} [services.supervisor] - MCP supervisor handle (capabilities row).
+ * @param {string} [services.skillsRoot] - absolute ~/.agents/skills path (capabilities row).
+ * @param {object} [services.skillsStoreModule] - skills-store module (capabilities row).
+ * @param {object} [services.selectionStore] - session selection store (capabilities row).
+ * @param {() => Promise<Array<object>>} [services.listSkills] - skill listing (capabilities row).
  * @param {(sessionId: string) => void} [services.onSelectionChanged] - hook for live agent re-sync.
  * @param {() => Promise<Array<object>>} [services.detectAgentSources] - one-click sync scanner.
  * @param {(source: string) => Promise<object>} [services.installSkillFromGithub] - GitHub skill installer.
@@ -50,17 +57,8 @@ export const MAX_BODY_BYTES = 512 * 1024;
  */
 export function createHandler(services) {
   const {
-    store,
-    supervisor,
-    skillsRoot,
-    skillsStore,
-    selectionStore,
-    listSkills,
+    skillsStoreModule: skillsStore,
     onSelectionChanged,
-    detectAgentSources,
-    installSkillFromGithub,
-    subagentsStore,
-    onSubagentsChanged,
     listLlmCatalog,
     sessionFresh,
     processStore,
@@ -73,11 +71,26 @@ export function createHandler(services) {
    * without `listUserRoles` (their listings equal their user records).
    */
   async function builtinSnapshot() {
+    const subagentsStore = services.subagentsStore;
     if (subagentsStore === undefined) return {};
     const raw = typeof subagentsStore.listUserRoles === 'function'
       ? await subagentsStore.listUserRoles()
       : await subagentsStore.listRoles();
     return builtinStates(raw);
+  }
+
+  /** 501 guard: routes below need the capabilities row's services. */
+  function capabilitiesUnavailable(res) {
+    if (services.store !== undefined) return false;
+    sendJson(res, 501, { ok: false, error: 'not-supported' });
+    return true;
+  }
+
+  /** 501 guard: routes below need the subagents row's store. */
+  function subagentsUnavailable(res) {
+    if (services.subagentsStore !== undefined) return false;
+    sendJson(res, 501, { ok: false, error: 'not-supported' });
+    return true;
   }
 
   /** Write one JSON response. */
@@ -123,25 +136,39 @@ export function createHandler(services) {
   /**
    * Answer GET /state: store servers, live pool, skills, store metadata,
    * and the feature rows currently loaded (the client hides each disabled
-   * feature's UI: settings pages, chip, tab).
+   * feature's UI: settings pages, chip, tab). Without the capabilities row
+   * the capabilities fields answer their empty shape so the shared route
+   * still parses for the other features' pages.
    *
    * @param {object} res
    */
   async function stateResponse(res) {
-    const servers = await store.listServers();
-    const agentsFile = await store.readAgentsFile();
+    if (services.store === undefined) {
+      sendJson(res, 200, {
+        ok: true,
+        servers: {},
+        pool: {},
+        skills: [],
+        features: typeof features === 'function' ? features() : ['capabilities', 'subagents', 'retry', 'processes'],
+        store: { agentsFile: { exists: false, count: 0, error: 'not-supported' } },
+        defaults: { mcp: null, skills: null },
+      });
+      return;
+    }
+    const servers = await services.store.listServers();
+    const agentsFile = await services.store.readAgentsFile();
     let skills = [];
     try {
-      skills = await listSkills();
+      skills = await services.listSkills();
     } catch { /* skills listing is advisory */ }
     sendJson(res, 200, {
       ok: true,
       servers,
-      pool: supervisor.status(),
+      pool: services.supervisor.status(),
       skills,
-      features: typeof features === 'function' ? features() : ['mcp', 'subagents', 'retry', 'processes'],
+      features: typeof features === 'function' ? features() : ['capabilities', 'subagents', 'retry', 'processes'],
       store: {
-        ...store.storeInfo(),
+        ...services.store.storeInfo(),
         agentsFile: { exists: agentsFile.exists, count: agentsFile.count, error: agentsFile.error },
       },
       defaults: { mcp: null, skills: null },
@@ -155,7 +182,7 @@ export function createHandler(services) {
    * @param {object} res
    */
   async function saveAndSync(res) {
-    await supervisor.sync(await store.listServers());
+    await services.supervisor.sync(await services.store.listServers());
     await stateResponse(res);
   }
 
@@ -176,7 +203,8 @@ export function createHandler(services) {
     }
 
     if (route === '/mcp/agents-file' && method === 'GET') {
-      const result = await store.agentsFileEntries();
+      if (capabilitiesUnavailable(res)) return;
+      const result = await services.store.agentsFileEntries();
       if (!result.ok) {
         sendJson(res, result.error === 'missing' ? 404 : 400, { ok: false, error: result.error });
         return;
@@ -196,6 +224,7 @@ export function createHandler(services) {
     }
 
     if (route === '/mcp/import' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null) {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -210,7 +239,7 @@ export function createHandler(services) {
         sendJson(res, 400, { ok: false, error: 'bad-json', message: parsed.error });
         return;
       }
-      const known = await store.listServers();
+      const known = await services.store.listServers();
       let entries = parsed.entries.map((entry) => ({
         name: entry.name,
         server: entry.server,
@@ -220,7 +249,7 @@ export function createHandler(services) {
       if (body.test === true) {
         entries = await Promise.all(entries.map(async (entry) => {
           if (entry.issue !== null && entry.issue !== 'name-exists') return entry;
-          const result = await supervisor.testOne(entry.name, entry.server);
+          const result = await services.supervisor.testOne(entry.name, entry.server);
           return { ...entry, test: result.ok ? { ok: true, toolCount: result.tools.length } : { ok: false, error: result.error } };
         }));
       }
@@ -229,6 +258,7 @@ export function createHandler(services) {
     }
 
     if (route === '/mcp/import/commit' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || !Array.isArray(body.entries)) {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -241,7 +271,7 @@ export function createHandler(services) {
         if (typeof item.name !== 'string' || !NAME_PATTERN.test(item.name)) continue;
         const normalized = normalizeServer(item.server);
         if (!normalized.ok) continue;
-        const stored = await store.putServer(item.name, normalized.server);
+        const stored = await services.store.putServer(item.name, normalized.server);
         if (stored.ok) accepted += 1;
       }
       if (accepted === 0) {
@@ -253,6 +283,7 @@ export function createHandler(services) {
     }
 
     if (route === '/mcp/save' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string' || !NAME_PATTERN.test(body.name)) {
         sendJson(res, 400, { ok: false, error: 'bad-name' });
@@ -263,7 +294,7 @@ export function createHandler(services) {
         sendJson(res, 400, { ok: false, error: normalized.error });
         return;
       }
-      const stored = await store.putServer(body.name, normalized.server);
+      const stored = await services.store.putServer(body.name, normalized.server);
       if (!stored.ok) {
         sendJson(res, 500, { ok: false, error: 'write-failed', message: stored.error });
         return;
@@ -273,17 +304,18 @@ export function createHandler(services) {
     }
 
     if (route === '/mcp/delete' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      const known = await store.listServers();
+      const known = await services.store.listServers();
       if (known[body.name] === undefined) {
         sendJson(res, 404, { ok: false, error: 'not-found' });
         return;
       }
-      const removed = await store.removeServer(body.name);
+      const removed = await services.store.removeServer(body.name);
       if (!removed.ok) {
         sendJson(res, 500, { ok: false, error: 'remove-failed', message: removed.error });
         return;
@@ -293,17 +325,18 @@ export function createHandler(services) {
     }
 
     if (route === '/mcp/toggle' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string' || typeof body.enabled !== 'boolean') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      const servers = await store.listServers();
+      const servers = await services.store.listServers();
       if (servers[body.name] === undefined) {
         sendJson(res, 404, { ok: false, error: 'not-found' });
         return;
       }
-      const stored = await store.putServer(body.name, { ...servers[body.name], enabled: body.enabled });
+      const stored = await services.store.putServer(body.name, { ...servers[body.name], enabled: body.enabled });
       if (!stored.ok) {
         sendJson(res, 500, { ok: false, error: 'write-failed', message: stored.error });
         return;
@@ -313,58 +346,60 @@ export function createHandler(services) {
       // settings page's 5s poll renders each card's live
       // connecting/connected state, and sync() itself re-registers tools
       // through onChange when connections settle.
-      void supervisor.sync(await store.listServers()).catch(() => { /* pool errors surface via /state */ });
+      void services.supervisor.sync(await services.store.listServers()).catch(() => { /* pool errors surface via /state */ });
       await stateResponse(res);
       return;
     }
 
     if (route === '/mcp/test' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
-      const servers = await store.listServers();
+      const servers = await services.store.listServers();
       if (body !== null && typeof body.name === 'string') {
         const server = servers[body.name];
         if (server === undefined) {
           sendJson(res, 404, { ok: false, error: 'not-found' });
           return;
         }
-        const result = await supervisor.testOne(body.name, server);
+        const result = await services.supervisor.testOne(body.name, server);
         // Remember the outcome for every /state reader (settings card dot,
         // session chip), then reconcile the pool so a test doubles as the
         // user's "reconnect this server" gesture.
-        if (typeof supervisor.recordTest === 'function') supervisor.recordTest(body.name, result);
-        await supervisor.sync(servers);
+        if (typeof services.supervisor.recordTest === 'function') services.supervisor.recordTest(body.name, result);
+        await services.supervisor.sync(servers);
         sendJson(res, 200, { ok: true, results: { [body.name]: result } });
         return;
       }
       /** @type {Record<string, object>} */
       const results = {};
       await Promise.all(Object.entries(servers).map(async ([name, server]) => {
-        results[name] = server.enabled === false ? { ok: false, error: 'disabled' } : await supervisor.testOne(name, server);
+        results[name] = server.enabled === false ? { ok: false, error: 'disabled' } : await services.supervisor.testOne(name, server);
       }));
-      if (typeof supervisor.recordTest === 'function') {
+      if (typeof services.supervisor.recordTest === 'function') {
         for (const [name, result] of Object.entries(results)) {
           // "disabled" placeholders are not real probes; skip them.
-          if (servers[name].enabled !== false) supervisor.recordTest(name, result);
+          if (servers[name].enabled !== false) services.supervisor.recordTest(name, result);
         }
       }
-      await supervisor.sync(servers);
+      await services.supervisor.sync(servers);
       sendJson(res, 200, { ok: true, results });
       return;
     }
 
     if (route === '/mcp/call' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string' || typeof body.tool !== 'string' || body.tool === '') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      const servers = await store.listServers();
+      const servers = await services.store.listServers();
       const server = servers[body.name];
       if (server === undefined) {
         sendJson(res, 404, { ok: false, error: 'not-found' });
         return;
       }
-      if (typeof supervisor.call !== 'function') {
+      if (typeof services.supervisor.call !== 'function') {
         sendJson(res, 501, { ok: false, error: 'not-supported' });
         return;
       }
@@ -373,7 +408,7 @@ export function createHandler(services) {
         : {};
       const timeoutMs = Number.isInteger(server.toolCallTimeoutMs) ? server.toolCallTimeoutMs : 60000;
       try {
-        const result = await supervisor.call(body.name, body.tool, args, AbortSignal.timeout(timeoutMs));
+        const result = await services.supervisor.call(body.name, body.tool, args, AbortSignal.timeout(timeoutMs));
         sendJson(res, 200, { ok: true, result });
       } catch (error) {
         sendJson(res, 500, { ok: false, error: 'call-failed', message: error instanceof Error ? error.message : String(error) });
@@ -382,16 +417,17 @@ export function createHandler(services) {
     }
 
     if (route === '/skills/install-github' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.source !== 'string' || body.source.trim() === '') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      if (installSkillFromGithub === undefined) {
+      if (services.installSkillFromGithub === undefined) {
         sendJson(res, 501, { ok: false, error: 'not-supported' });
         return;
       }
-      const result = await installSkillFromGithub(body.source.trim());
+      const result = await services.installSkillFromGithub(body.source.trim());
       if (!result.ok) {
         const status = result.error === 'not-found' || result.error === 'bad-shape' || result.error === 'empty' ? 400 : 502;
         sendJson(res, status, { ok: false, error: result.error, message: result.message });
@@ -402,29 +438,32 @@ export function createHandler(services) {
     }
 
     if (route === '/skills/list' && method === 'GET') {
-      const skills = await listSkills();
+      if (capabilitiesUnavailable(res)) return;
+      const skills = await services.listSkills();
       sendJson(res, 200, { ok: true, skills });
       return;
     }
 
     if (route === '/skills/files' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.skill !== 'string') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      const files = await skillsStore.listSkillFiles(`${skillsRoot}/${body.skill}`);
+      const files = await skillsStore.listSkillFiles(`${services.skillsRoot}/${body.skill}`);
       sendJson(res, 200, { ok: true, files });
       return;
     }
 
     if (route === '/skills/file/read' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.skill !== 'string' || typeof body.path !== 'string') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      const result = await skillsStore.readSkillFile(skillsRoot, body.skill, body.path);
+      const result = await skillsStore.readSkillFile(services.skillsRoot, body.skill, body.path);
       if (!result.ok) {
         sendJson(res, result.error === 'not-found' ? 404 : 400, { ok: false, error: result.error });
         return;
@@ -434,13 +473,14 @@ export function createHandler(services) {
     }
 
     if (route === '/skills/file/write' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.skill !== 'string' || typeof body.path !== 'string' || typeof body.content !== 'string') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
       const baseSha = typeof body.sha === 'string' ? body.sha : null;
-      const result = await skillsStore.writeSkillFile(skillsRoot, body.skill, body.path, body.content, baseSha);
+      const result = await skillsStore.writeSkillFile(services.skillsRoot, body.skill, body.path, body.content, baseSha);
       if (!result.ok) {
         const status = result.error === 'conflict' ? 409 : result.error === 'not-found' ? 404 : 400;
         sendJson(res, status, { ok: false, error: result.error });
@@ -466,29 +506,31 @@ export function createHandler(services) {
     }
 
     if (route === '/session/selection' && method === 'GET') {
+      if (capabilitiesUnavailable(res)) return;
       const url = new URL(String(req.url ?? '/'), 'http://localhost');
       const id = url.searchParams.get('id');
       if (id === null || id === '') {
         sendJson(res, 400, { ok: false, error: 'bad-id' });
         return;
       }
-      sendJson(res, 200, { ok: true, selection: selectionStore.get(id) });
+      sendJson(res, 200, { ok: true, selection: services.selectionStore.get(id) });
       return;
     }
 
     if (route === '/session/selection' && method === 'POST') {
+      if (capabilitiesUnavailable(res)) return;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.sessionId !== 'string' || body.sessionId === '') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
         return;
       }
-      selectionStore.set(body.sessionId, { mcp: body.mcp, skills: body.skills });
+      services.selectionStore.set(body.sessionId, { mcp: body.mcp, skills: body.skills });
       if (onSelectionChanged !== undefined) {
         try {
           onSelectionChanged(body.sessionId);
         } catch { /* re-sync hook is best-effort */ }
       }
-      sendJson(res, 200, { ok: true, selection: selectionStore.get(body.sessionId) });
+      sendJson(res, 200, { ok: true, selection: services.selectionStore.get(body.sessionId) });
       return;
     }
 
@@ -529,10 +571,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents' && method === 'GET') {
-      if (subagentsStore === undefined) {
-        sendJson(res, 501, { ok: false, error: 'not-supported' });
-        return;
-      }
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const roles = await subagentsStore.listRoles();
       const models = typeof subagentsStore.listPoolModels === 'function' ? await subagentsStore.listPoolModels() : [];
       sendJson(res, 200, { ok: true, roles, models, builtin: await builtinSnapshot(), store: subagentsStore.storeInfo() });
@@ -540,6 +580,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents/models/save' && method === 'POST') {
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.entry !== 'object' || body.entry === null) {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -556,9 +598,9 @@ export function createHandler(services) {
         sendJson(res, 500, { ok: false, error: 'write-failed', message: stored.error });
         return;
       }
-      if (onSubagentsChanged !== undefined) {
+      if (services.onSubagentsChanged !== undefined) {
         try {
-          onSubagentsChanged();
+          services.onSubagentsChanged();
         } catch { /* re-sync hook is best-effort */ }
       }
       sendJson(res, 200, { ok: true, key, models: await subagentsStore.listPoolModels() });
@@ -566,10 +608,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents/models/bulk' && method === 'POST') {
-      if (subagentsStore === undefined) {
-        sendJson(res, 501, { ok: false, error: 'not-supported' });
-        return;
-      }
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const body = objectBody(await readJsonBody(req));
       if (body === null || !Array.isArray(body.entries)) {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -589,9 +629,9 @@ export function createHandler(services) {
         const stored = await subagentsStore.putPoolModel(key, normalized.entry);
         if (stored.ok) { existing.add(key); imported.push(normalized.entry); }
       }
-      if (onSubagentsChanged !== undefined) {
+      if (services.onSubagentsChanged !== undefined) {
         try {
-          onSubagentsChanged();
+          services.onSubagentsChanged();
         } catch { /* re-sync hook is best-effort */ }
       }
       sendJson(res, 200, { ok: true, imported, skipped, models: await subagentsStore.listPoolModels() });
@@ -599,6 +639,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents/models/delete' && method === 'POST') {
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.key !== 'string' || body.key === '') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -609,9 +651,9 @@ export function createHandler(services) {
         sendJson(res, removed.error === 'not-found' ? 404 : 500, { ok: false, error: removed.error });
         return;
       }
-      if (onSubagentsChanged !== undefined) {
+      if (services.onSubagentsChanged !== undefined) {
         try {
-          onSubagentsChanged();
+          services.onSubagentsChanged();
         } catch { /* re-sync hook is best-effort */ }
       }
       sendJson(res, 200, { ok: true, models: await subagentsStore.listPoolModels() });
@@ -619,10 +661,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents/save' && method === 'POST') {
-      if (subagentsStore === undefined) {
-        sendJson(res, 501, { ok: false, error: 'not-supported' });
-        return;
-      }
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -646,9 +686,9 @@ export function createHandler(services) {
         sendJson(res, 500, { ok: false, error: 'write-failed', message: stored.error });
         return;
       }
-      if (onSubagentsChanged !== undefined) {
+      if (services.onSubagentsChanged !== undefined) {
         try {
-          onSubagentsChanged();
+          services.onSubagentsChanged();
         } catch { /* re-sync hook is best-effort */ }
       }
       sendJson(res, 200, { ok: true, name, roles: await subagentsStore.listRoles(), store: subagentsStore.storeInfo() });
@@ -656,10 +696,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents/delete' && method === 'POST') {
-      if (subagentsStore === undefined) {
-        sendJson(res, 501, { ok: false, error: 'not-supported' });
-        return;
-      }
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string' || body.name === '') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -682,9 +720,9 @@ export function createHandler(services) {
           return;
         }
       }
-      if (onSubagentsChanged !== undefined) {
+      if (services.onSubagentsChanged !== undefined) {
         try {
-          onSubagentsChanged();
+          services.onSubagentsChanged();
         } catch { /* re-sync hook is best-effort */ }
       }
       sendJson(res, 200, { ok: true, roles: await subagentsStore.listRoles(), builtin: await builtinSnapshot(), store: subagentsStore.storeInfo() });
@@ -692,10 +730,8 @@ export function createHandler(services) {
     }
 
     if (route === '/subagents/restore' && method === 'POST') {
-      if (subagentsStore === undefined) {
-        sendJson(res, 501, { ok: false, error: 'not-supported' });
-        return;
-      }
+      if (subagentsUnavailable(res)) return;
+      const subagentsStore = services.subagentsStore;
       const body = objectBody(await readJsonBody(req));
       if (body === null || typeof body.name !== 'string' || body.name === '') {
         sendJson(res, 400, { ok: false, error: 'bad-body' });
@@ -712,9 +748,9 @@ export function createHandler(services) {
         sendJson(res, 500, { ok: false, error: removed.error });
         return;
       }
-      if (onSubagentsChanged !== undefined) {
+      if (services.onSubagentsChanged !== undefined) {
         try {
-          onSubagentsChanged();
+          services.onSubagentsChanged();
         } catch { /* re-sync hook is best-effort */ }
       }
       sendJson(res, 200, { ok: true, roles: await subagentsStore.listRoles(), builtin: await builtinSnapshot(), store: subagentsStore.storeInfo() });
