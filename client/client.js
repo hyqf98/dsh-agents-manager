@@ -811,8 +811,7 @@ window.__ModuleLoader__.load({
 			".am-card-name { font-weight: 600; font-size: 13px; }",
 			".am-card-body { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.55; display: flex; flex-direction: column; gap: 4px; min-width: 0; }",
 			".am-card-head .am-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-			".am-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }",
-			".am-card-actions::-webkit-scrollbar { display: none; }",
+			".am-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; flex: 0 1 auto; overflow: hidden; }",
 			".am-card-actions .am-btn { flex: none; }",
 			".am-more { position: relative; flex: none; }",
 			".am-more-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; min-width: 148px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; box-shadow: 0 16px 44px rgba(0,0,0,.28); padding: 5px; display: flex; flex-direction: column; gap: 2px; animation: am-fade-in .1s ease; }",
@@ -1953,6 +1952,11 @@ window.__ModuleLoader__.load({
 		var setMoreOpen = moreOpen[1];
 		moreOpen = moreOpen[0];
 		var moreRef = useRef(null);
+		var stripRef = useRef(null);
+		/** How many leading action buttons fit without overflow; null = all fit. */
+		var overflowAt = useState(null);
+		var setOverflowAt = overflowAt[1];
+		overflowAt = overflowAt[0];
 		var toggling = useState(false);
 		var setToggling = toggling[1];
 		toggling = toggling[0];
@@ -2017,16 +2021,85 @@ window.__ModuleLoader__.load({
 					document.removeEventListener("keydown", onKey);
 				};
 			}, [moreOpen]);
-			// Leaving the card or opening the menu resets an armed delete.
-			function armDelete() {
-				setConfirming(true);
-				setMoreOpen(false);
-			}
 
-			/** One kebab-menu action row; dangerously deletable while armed. */
+			// Overflow measurement: decide how many action buttons fit in the
+			// head row's REMAINING space, and drop the rest into the ⋯ menu.
+			// Measured against the head row (strip.offsetLeft → head.clientWidth)
+			// rather than the strip's own box, so collapsing buttons cannot
+			// feed back into the measurement (shrink → "fits" → restore →
+			// overflow → …). Reserve room for the ⋯ button itself once any
+			// split happens. Re-measured on mount, locale change, tool-count
+			// and label-state changes (测试→测试中…, 删除→确定删除该服务器？) and
+			// container resizes (ResizeObserver on the head; the settings pane
+			// resizes with the sidebar).
+			useEffect(function () {
+				var strip = stripRef.current;
+				var head = strip !== null && strip !== undefined ? strip.parentElement : null;
+				if (head === null || head === undefined || typeof ResizeObserver === "undefined") {
+					setOverflowAt(null);
+					return undefined;
+				}
+				/** Room the ⋯ affordance needs once the list splits. */
+				var KEBAB_RESERVE = 44;
+				function measure() {
+					var buttons = strip.querySelectorAll(":scope > .am-btn");
+					if (buttons.length === 0) { setOverflowAt(null); return; }
+					var available = head.clientWidth - strip.offsetLeft - 2;
+					// Walk from the end: the largest prefix whose last button
+					// still ends inside the reserved space.
+					var fit = buttons.length;
+					for (var i = buttons.length - 1; i >= 0; i -= 1) {
+						var end = buttons[i].offsetLeft + buttons[i].offsetWidth;
+						if (end > available - KEBAB_RESERVE) fit = i;
+					}
+					// Everything fits with room to spare: no ⋯ at all.
+					if (fit === buttons.length && buttons[buttons.length - 1].offsetLeft + buttons[buttons.length - 1].offsetWidth <= available) {
+						setOverflowAt(null);
+						return;
+					}
+					// Keep at least one inline; a lone overflowing action
+					// collapses into ⋯ instead of the row shrinking to zero.
+					setOverflowAt(Math.max(1, fit));
+				}
+				var observer = new ResizeObserver(function () { measure(); });
+				observer.observe(head);
+				measure();
+				return function () { observer.disconnect(); };
+			}, [t, tools.length, testing, confirming]);
+
+			// The full action list, shared by the inline strip and the ⋯ menu.
+			function cardActions() {
+				var items = [{
+					key: "test",
+					label: testing ? t("mcp.testing") : t("mcp.test"),
+					disabled: testing || server.enabled === false,
+					run: function () { props.onTest(props.name); }
+				}];
+				if (tools.length > 0) items.push({
+					key: "tools",
+					label: "⚙ " + t("mcp.tools"),
+					title: t("mcp.tools.open"),
+					desc: format(t("mcp.toolCount"), { n: tools.length }),
+					run: function () { if (props.onTools !== undefined) props.onTools(props.name); }
+				});
+				items.push({
+					key: "edit",
+					label: t("mcp.edit"),
+					run: function () { props.onEdit(props.name); }
+				});
+				items.push({
+					key: "delete",
+					label: confirming ? t("mcp.delConfirm") : t("mcp.del"),
+					danger: true,
+					run: function () { if (confirming) props.onDelete(props.name); else setConfirming(true); }
+				});
+				return items;
+			}
+			/** One kebab-menu action row; the delete entry turns red. */
 			function moreItem(key, label, options) {
 				options = options || {};
 				return h("button", {
+					key: key,
 					type: "button",
 					className: "am-more-item",
 					"data-variant": options.danger === true ? "danger" : "",
@@ -2034,6 +2107,13 @@ window.__ModuleLoader__.load({
 					onClick: function () { setMoreOpen(false); options.run(); }
 				}, label, options.desc !== undefined ? h("span", { className: "am-more-desc" }, options.desc) : null);
 			}
+
+			var actions = cardActions();
+			/** null = everything fits inline, no ⋯ needed; otherwise the index
+			 *  where the inline strip stops (rest go into the menu). */
+			var splitAt = overflowAt === null ? actions.length : overflowAt;
+			var inlineActions = actions.slice(0, splitAt);
+			var menuActions = actions.slice(splitAt);
 
 			return h("div", { className: "am-card", onMouseLeave: function () { setConfirming(false); } },
 				h("div", { className: "am-card-head" },
@@ -2056,44 +2136,34 @@ window.__ModuleLoader__.load({
 						disabled: switchBusy,
 						onClick: toggle
 					}, switchBusy ? h("span", { className: "am-spin", "aria-hidden": "true" }) : null),
-					h("div", { className: "am-more", ref: moreRef },
-						h("button", {
-							type: "button", className: "am-btn", "data-variant": "ghost",
-							"aria-expanded": moreOpen ? "true" : "false",
-							"aria-haspopup": "menu",
-							"aria-label": t("mcp.more.title"),
-							title: t("mcp.more.title"),
-							onClick: function () { setMoreOpen(function (current) { return !current; }); }
-						}, "⋯"),
-						moreOpen ? h("div", { className: "am-more-menu", role: "menu" },
-							moreItem("test", testing ? t("mcp.testing") : t("mcp.test"), {
-								disabled: testing || server.enabled === false,
-								run: function () { props.onTest(props.name); }
-							}),
-							tools.length > 0 ? moreItem("tools", "⚙ " + t("mcp.tools"), {
-								desc: format(t("mcp.toolCount"), { n: tools.length }),
-								run: function () { if (props.onTools !== undefined) props.onTools(props.name); }
-							}) : null,
-							moreItem("edit", t("mcp.edit"), { run: function () { props.onEdit(props.name); } }),
-							moreItem("delete", confirming ? t("mcp.delConfirm") : t("mcp.del"), {
-								danger: true,
-								run: function () { if (confirming) props.onDelete(props.name); else armDelete(); }
-							})
+					h("div", { className: "am-card-actions", ref: stripRef },
+						inlineActions.map(function (action) {
+							return h("button", {
+								key: action.key,
+								type: "button",
+								className: "am-btn",
+								"data-variant": action.danger === true && confirming === true ? "danger" : "",
+								disabled: action.disabled === true,
+								title: action.title,
+								onClick: action.run
+							}, action.label);
+						}),
+						menuActions.length > 0 ? h("div", { className: "am-more", ref: moreRef },
+							h("button", {
+								type: "button", className: "am-btn", "data-variant": "ghost",
+								"aria-expanded": moreOpen ? "true" : "false",
+								"aria-haspopup": "menu",
+								"aria-label": t("mcp.more.title"),
+								title: t("mcp.more.title"),
+								onClick: function () { setMoreOpen(function (current) { return !current; }); }
+							}, "⋯"),
+							moreOpen ? h("div", { className: "am-more-menu", role: "menu" },
+								menuActions.map(function (action) {
+									return moreItem(action.key, action.label, action);
+								})
+							) : null
 						) : null
 					)
-				),
-				h("div", { className: "am-card-actions" },
-					h("button", { type: "button", className: "am-btn", disabled: testing || server.enabled === false, onClick: function () { props.onTest(props.name); } }, testing ? t("mcp.testing") : t("mcp.test")),
-					tools.length > 0 ? h("button", { type: "button", className: "am-btn", title: t("mcp.tools.open"), onClick: function () { if (props.onTools !== undefined) props.onTools(props.name); } }, "⚙ " + t("mcp.tools")) : null,
-					h("button", { type: "button", className: "am-btn", onClick: function () { props.onEdit(props.name); } }, t("mcp.edit")),
-					h("button", {
-						type: "button", className: "am-btn", "data-variant": confirming ? "danger" : "",
-						onClick: function () {
-							if (confirming) props.onDelete(props.name);
-							else setConfirming(true);
-						},
-						onBlur: function () { setConfirming(false); }
-					}, confirming ? t("mcp.delConfirm") : t("mcp.del"))
 				),
 				h("div", { className: "am-card-body" },
 					h("span", { className: "am-tool-name", title: summary }, summary),
