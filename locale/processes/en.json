@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Process Panel",
-    "description": "Per-session service-process panel: the report_service_process tool, shell-call auto detection, background-job auto registration, the \"Processes\" conversation tab."
+    "description": "View and manage this session’s running service processes."
   }
 }

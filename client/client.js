@@ -94,6 +94,10 @@ window.__ModuleLoader__.load({
 			"mcp.tools.result": "调用结果",
 			"mcp.tools.badJson": "参数不是有效的 JSON 对象：{message}",
 			"mcp.tools.failed": "调用失败：{message}",
+			"mcp.more": "More",
+			"mcp.more.title": "More actions",
+			"mcp.more": "更多",
+			"mcp.more.title": "更多操作",
 			"mcp.status.ok": "已连接",
 			"mcp.status.fail": "失败",
 			"mcp.status.testing": "测试中",
@@ -803,9 +807,27 @@ window.__ModuleLoader__.load({
 			".am-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-right: 2px; }",
 			".am-card { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); border-radius: 12px; padding: 12px 14px; transition: border-color .14s ease; }",
 			".am-card:hover { border-color: var(--dsw-alias-border-l2); }",
-			".am-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }",
+			".am-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }",
 			".am-card-name { font-weight: 600; font-size: 13px; }",
 			".am-card-body { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.55; display: flex; flex-direction: column; gap: 4px; min-width: 0; }",
+			".am-card-head .am-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+			".am-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }",
+			".am-card-actions::-webkit-scrollbar { display: none; }",
+			".am-card-actions .am-btn { flex: none; }",
+			".am-more { position: relative; flex: none; }",
+			".am-more-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; min-width: 148px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; box-shadow: 0 16px 44px rgba(0,0,0,.28); padding: 5px; display: flex; flex-direction: column; gap: 2px; animation: am-fade-in .1s ease; }",
+			".am-more-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; text-align: left; padding: 7px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }",
+			".am-more-item:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }",
+			".am-more-item:disabled { opacity: .45; cursor: default; }",
+			".am-more-item[data-variant='danger'] { color: var(--dsw-alias-state-error-primary); }",
+			".am-more-item .am-more-desc { color: var(--dsw-alias-label-secondary); font-size: 11px; margin-left: auto; padding-left: 12px; }",
+			/* ---- host plugin detail page: hide our rows' technical id tags ----
+			 * The manager page renders the row title (our locale meta.title) plus
+			 * <code> tags for the entry id and module specifier. Ours duplicate
+			 * the Chinese title, so hide them for our rows only; other plugins'
+			 * rows keep theirs. Attribute specificity (0,2,0) beats the page's
+			 * single-class rule regardless of <style> order. */
+			"li[data-plugin-row$=agents-manager-capabilities] code, li[data-plugin-row$=agents-manager-subagents] code, li[data-plugin-row$=agents-manager-retry] code, li[data-plugin-row$=agents-manager-processes] code { display: none; }",
 			".am-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 1.5; word-break: break-word; }",
 			".am-hint { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.55; }",
 			".am-tools { border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }",
@@ -1918,6 +1940,10 @@ window.__ModuleLoader__.load({
 		var confirming = useState(false);
 		var setConfirming = confirming[1];
 		confirming = confirming[0];
+		var moreOpen = useState(false);
+		var setMoreOpen = moreOpen[1];
+		moreOpen = moreOpen[0];
+		var moreRef = useRef(null);
 		var toggling = useState(false);
 		var setToggling = toggling[1];
 		toggling = toggling[0];
@@ -1966,10 +1992,44 @@ window.__ModuleLoader__.load({
 				}
 			}
 
-			return h("div", { className: "am-card" },
+			// Click-outside / Escape closes the kebab menu.
+			useEffect(function () {
+				if (!moreOpen) return undefined;
+				function onDown(event) {
+					if (moreRef.current !== null && moreRef.current !== undefined && !moreRef.current.contains(event.target)) setMoreOpen(false);
+				}
+				function onKey(event) {
+					if (event.key === "Escape") setMoreOpen(false);
+				}
+				document.addEventListener("mousedown", onDown);
+				document.addEventListener("keydown", onKey);
+				return function () {
+					document.removeEventListener("mousedown", onDown);
+					document.removeEventListener("keydown", onKey);
+				};
+			}, [moreOpen]);
+			// Leaving the card or opening the menu resets an armed delete.
+			function armDelete() {
+				setConfirming(true);
+				setMoreOpen(false);
+			}
+
+			/** One kebab-menu action row; dangerously deletable while armed. */
+			function moreItem(key, label, options) {
+				options = options || {};
+				return h("button", {
+					type: "button",
+					className: "am-more-item",
+					"data-variant": options.danger === true ? "danger" : "",
+					disabled: options.disabled === true,
+					onClick: function () { setMoreOpen(false); options.run(); }
+				}, label, options.desc !== undefined ? h("span", { className: "am-more-desc" }, options.desc) : null);
+			}
+
+			return h("div", { className: "am-card", onMouseLeave: function () { setConfirming(false); } },
 				h("div", { className: "am-card-head" },
 					h("span", { className: "am-dot", "data-tone": status.tone, "data-pulse": status.key === "connecting" ? "true" : "false" }),
-					h("span", { className: "am-card-name" }, props.name),
+					h("span", { className: "am-card-name", title: props.name }, props.name),
 					h("span", { className: "am-badge" }, server.transport),
 					h("span", { className: "am-badge", "data-tone": status.tone }, t("mcp.status." + status.key)),
 					tools.length > 0 ? h("span", { className: "am-badge" }, format(t("mcp.toolCount"), { n: tools.length })) : null,
@@ -1987,6 +2047,33 @@ window.__ModuleLoader__.load({
 						disabled: switchBusy,
 						onClick: toggle
 					}, switchBusy ? h("span", { className: "am-spin", "aria-hidden": "true" }) : null),
+					h("div", { className: "am-more", ref: moreRef },
+						h("button", {
+							type: "button", className: "am-btn", "data-variant": "ghost",
+							"aria-expanded": moreOpen ? "true" : "false",
+							"aria-haspopup": "menu",
+							"aria-label": t("mcp.more.title"),
+							title: t("mcp.more.title"),
+							onClick: function () { setMoreOpen(function (current) { return !current; }); }
+						}, "⋯"),
+						moreOpen ? h("div", { className: "am-more-menu", role: "menu" },
+							moreItem("test", testing ? t("mcp.testing") : t("mcp.test"), {
+								disabled: testing || server.enabled === false,
+								run: function () { props.onTest(props.name); }
+							}),
+							tools.length > 0 ? moreItem("tools", "⚙ " + t("mcp.tools"), {
+								desc: format(t("mcp.toolCount"), { n: tools.length }),
+								run: function () { if (props.onTools !== undefined) props.onTools(props.name); }
+							}) : null,
+							moreItem("edit", t("mcp.edit"), { run: function () { props.onEdit(props.name); } }),
+							moreItem("delete", confirming ? t("mcp.delConfirm") : t("mcp.del"), {
+								danger: true,
+								run: function () { if (confirming) props.onDelete(props.name); else armDelete(); }
+							})
+						) : null
+					)
+				),
+				h("div", { className: "am-card-actions" },
 					h("button", { type: "button", className: "am-btn", disabled: testing || server.enabled === false, onClick: function () { props.onTest(props.name); } }, testing ? t("mcp.testing") : t("mcp.test")),
 					tools.length > 0 ? h("button", { type: "button", className: "am-btn", title: t("mcp.tools.open"), onClick: function () { if (props.onTools !== undefined) props.onTools(props.name); } }, "⚙ " + t("mcp.tools")) : null,
 					h("button", { type: "button", className: "am-btn", onClick: function () { props.onEdit(props.name); } }, t("mcp.edit")),

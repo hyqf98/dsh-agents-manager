@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "MCP 技能管理",
-    "description": "MCP 服务器与技能的可视化管理、按会话的能力选择（MCP/技能开关）、MCP 连接测试与「MCP 和技能」设置页、输入框能力选择芯片。"
+    "description": "管理 MCP 服务器与技能，按会话选择启用能力。"
   }
 }

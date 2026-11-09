@@ -89,7 +89,9 @@
     "import.sync.count": "{n} 台",
     "import.sync.needRestart": "同步需要新版宿主模块：请完全退出并重启 DeepSeek Harness（不是刷新页面），然后重试。",
     "import.sync.all": "全选",
-    "import.sync.noneSel": "全不选"
+    "import.sync.noneSel": "全不选",
+    "more": "更多",
+    "more.title": "更多操作"
   },
   "skills": {
     "count": "{n} 个技能",

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "MCP & Skills Management",
-    "description": "Visual management of MCP servers and skills, per-session capability selection (MCP/skill toggles), MCP connection testing, the \"MCP & Skills\" settings page, and the composer capability chip."
+    "description": "Manage MCP servers and skills; pick capabilities per session."
   }
 }

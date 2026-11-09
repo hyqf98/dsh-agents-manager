@@ -89,7 +89,9 @@
     "import.sync.count": "{n} server(s)",
     "import.sync.needRestart": "Sync needs the updated host module: fully quit and restart DeepSeek Harness (not just a page refresh), then retry.",
     "import.sync.all": "All",
-    "import.sync.noneSel": "None"
+    "import.sync.noneSel": "None",
+    "more": "More",
+    "more.title": "More actions"
   },
   "skills": {
     "count": "{n} skill(s)",

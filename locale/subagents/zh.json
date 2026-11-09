@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "子代理管理",
-    "description": "委派角色（delegate_<role>）与候选模型链管理、「子代理」设置页、按调用选模型。"
+    "description": "管理可委派的子代理角色与模型选择。"
   }
 }
