@@ -828,6 +828,15 @@ window.__ModuleLoader__.load({
 			 * rows keep theirs. Attribute specificity (0,2,0) beats the page's
 			 * single-class rule regardless of <style> order. */
 			"li[data-plugin-row$=agents-manager-capabilities] code, li[data-plugin-row$=agents-manager-subagents] code, li[data-plugin-row$=agents-manager-retry] code, li[data-plugin-row$=agents-manager-processes] code { display: none; }",
+			/* ----「进程」view: full-bleed tab, no composer underneath ----
+			 * The host skeleton keeps the composer seat mounted below every
+			 * conversation view (the official trajectory view shows it too).
+			 * A dashboard-style tab reads wrong with a live prompt box, so
+			 * while our view is the one rendered, hide the seat through the
+			 * same :has() layout switching the host itself uses. Scoped to
+			 * the conversation scroll body only; the seat returns the moment
+			 * the user switches back to Chat. */
+			"[data-conversation-scroll]:has([data-am-process-view]) > [data-conversation-region=composer] { display: none; }",
 			".am-error { color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 1.5; word-break: break-word; }",
 			".am-hint { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.55; }",
 			".am-tools { border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }",
@@ -4909,7 +4918,7 @@ window.__ModuleLoader__.load({
 				});
 			}
 
-			return h("div", { className: "am-procview", role: "region", "aria-label": t("procs.title") },
+			return h("div", { className: "am-procview", role: "region", "aria-label": t("procs.title"), "data-am-process-view": "true" },
 				h("div", { className: "am-procview-head" },
 					h("span", { className: "am-dot", "data-tone": "ok" }),
 					h("span", { className: "am-proc-title" }, t("procs.title")),
