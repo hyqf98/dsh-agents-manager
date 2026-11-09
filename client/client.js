@@ -805,14 +805,17 @@ window.__ModuleLoader__.load({
 			"@keyframes am-dot-pulse { 0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 22%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--dsw-alias-state-warn-primary) 6%, transparent); } }",
 			/* ---- lists & cards ---- */
 			".am-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; padding-right: 2px; }",
-			".am-card { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); border-radius: 12px; padding: 12px 14px; transition: border-color .14s ease; }",
+			".am-card { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); border-radius: 12px; padding: 12px 14px; transition: border-color .14s ease; }",
 			".am-card:hover { border-color: var(--dsw-alias-border-l2); }",
 			".am-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }",
 			".am-card-name { font-weight: 600; font-size: 13px; }",
 			".am-card-body { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.55; display: flex; flex-direction: column; gap: 4px; min-width: 0; }",
 			".am-card-head .am-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-			".am-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; flex: 0 1 auto; overflow: hidden; }",
+			".am-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; flex: 0 1 auto; }",
 			".am-card-actions .am-btn { flex: none; }",
+			".am-card-meta { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; overflow: hidden; }",
+			".am-card-meta .am-card-name { flex: none; max-width: 40%; }",
+			".am-actions-measure { position: absolute; visibility: hidden; pointer-events: none; display: flex; gap: 8px; white-space: nowrap; left: 0; top: 0; height: 0; overflow: visible; }",
 			".am-more { position: relative; flex: none; }",
 			".am-more-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 80; min-width: 148px; background: var(--dsw-alias-bg-overlay); border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; box-shadow: 0 16px 44px rgba(0,0,0,.28); padding: 5px; display: flex; flex-direction: column; gap: 2px; animation: am-fade-in .1s ease; }",
 			".am-more-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; text-align: left; padding: 7px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; }",
@@ -1953,6 +1956,8 @@ window.__ModuleLoader__.load({
 		moreOpen = moreOpen[0];
 		var moreRef = useRef(null);
 		var stripRef = useRef(null);
+		var metaRef = useRef(null);
+		var measureRef = useRef(null);
 		/** How many leading action buttons fit without overflow; null = all fit. */
 		var overflowAt = useState(null);
 		var setOverflowAt = overflowAt[1];
@@ -2022,19 +2027,16 @@ window.__ModuleLoader__.load({
 				};
 			}, [moreOpen]);
 
-			// Overflow measurement: decide how many action buttons fit in the
-			// head row's REMAINING space, and drop the rest into the ⋯ menu.
-			// Measured against the head row (strip.offsetLeft → head.clientWidth)
-			// rather than the strip's own box, so collapsing buttons cannot
-			// feed back into the measurement (shrink → "fits" → restore →
-			// overflow → …). Reserve room for the ⋯ button itself once any
-			// split happens. Re-measured on mount, locale change, tool-count
-			// and label-state changes (测试→测试中…, 删除→确定删除该服务器？) and
-			// container resizes (ResizeObserver on the head; the settings pane
-			// resizes with the sidebar).
+			// Overflow measurement: a hidden row inside the card renders EVERY
+			// action at natural width; the split is decided from ITS geometry,
+			// never from the visible strip — so collapsing buttons cannot feed
+			// back into the measurement (no shrink→fits→restore→overflow
+			// oscillation). Available space = card head minus the meta cluster
+			// (name + badges), both reference-frame free via rects. Re-runs on
+			// locale change, tool count, label-state changes (测试中… /
+			// 确定删除该服务器？), and head resizes (sidebar drag).
 			useEffect(function () {
-				var strip = stripRef.current;
-				var head = strip !== null && strip !== undefined ? strip.parentElement : null;
+				var head = measureRef.current !== null && measureRef.current !== undefined ? measureRef.current.parentElement : null;
 				if (head === null || head === undefined || typeof ResizeObserver === "undefined") {
 					setOverflowAt(null);
 					return undefined;
@@ -2042,23 +2044,33 @@ window.__ModuleLoader__.load({
 				/** Room the ⋯ affordance needs once the list splits. */
 				var KEBAB_RESERVE = 44;
 				function measure() {
-					var buttons = strip.querySelectorAll(":scope > .am-btn");
+					var measureRow = measureRef.current;
+					var meta = metaRef.current;
+					if (measureRow === null || measureRow === undefined || meta === null || meta === undefined) return;
+					var buttons = measureRow.querySelectorAll(":scope > .am-btn");
 					if (buttons.length === 0) { setOverflowAt(null); return; }
-					var available = head.clientWidth - strip.offsetLeft - 2;
-					// Walk from the end: the largest prefix whose last button
-					// still ends inside the reserved space.
-					var fit = buttons.length;
-					for (var i = buttons.length - 1; i >= 0; i -= 1) {
-						var end = buttons[i].offsetLeft + buttons[i].offsetWidth;
-						if (end > available - KEBAB_RESERVE) fit = i;
+					var measureRect = measureRow.getBoundingClientRect();
+					var headRect = head.getBoundingClientRect();
+					var metaRect = meta.getBoundingClientRect();
+					// Space the strip may occupy: from the meta cluster's end to
+					// the head's end (the switch lives after the strip; keep its
+					// room too via a fixed reserve).
+					var SWITCH_RESERVE = 56;
+					var available = headRect.right - metaRect.right - 8 - SWITCH_RESERVE;
+					// Button ends relative to the measure row's left edge.
+					var ends = [];
+					for (var i = 0; i < buttons.length; i += 1) {
+						var rect = buttons[i].getBoundingClientRect();
+						ends.push(rect.right - measureRect.left);
 					}
-					// Everything fits with room to spare: no ⋯ at all.
-					if (fit === buttons.length && buttons[buttons.length - 1].offsetLeft + buttons[buttons.length - 1].offsetWidth <= available) {
+					var fit = buttons.length;
+					for (var j = buttons.length - 1; j >= 0; j -= 1) {
+						if (ends[j] > available - KEBAB_RESERVE) fit = j;
+					}
+					if (fit === buttons.length && ends[buttons.length - 1] <= available) {
 						setOverflowAt(null);
 						return;
 					}
-					// Keep at least one inline; a lone overflowing action
-					// collapses into ⋯ instead of the row shrinking to zero.
 					setOverflowAt(Math.max(1, fit));
 				}
 				var observer = new ResizeObserver(function () { measure(); });
@@ -2117,11 +2129,13 @@ window.__ModuleLoader__.load({
 
 			return h("div", { className: "am-card", onMouseLeave: function () { setConfirming(false); } },
 				h("div", { className: "am-card-head" },
-					h("span", { className: "am-dot", "data-tone": status.tone, "data-pulse": status.key === "connecting" ? "true" : "false" }),
-					h("span", { className: "am-card-name", title: props.name }, props.name),
-					h("span", { className: "am-badge" }, server.transport),
-					h("span", { className: "am-badge", "data-tone": status.tone }, t("mcp.status." + status.key)),
-					tools.length > 0 ? h("span", { className: "am-badge" }, format(t("mcp.toolCount"), { n: tools.length })) : null,
+					h("div", { className: "am-card-meta", ref: metaRef },
+						h("span", { className: "am-dot", "data-tone": status.tone, "data-pulse": status.key === "connecting" ? "true" : "false" }),
+						h("span", { className: "am-card-name", title: props.name }, props.name),
+						h("span", { className: "am-badge" }, server.transport),
+						h("span", { className: "am-badge", "data-tone": status.tone }, t("mcp.status." + status.key)),
+						tools.length > 0 ? h("span", { className: "am-badge" }, format(t("mcp.toolCount"), { n: tools.length })) : null
+					),
 					h("div", { className: "am-spacer" }),
 					h("button", {
 						type: "button",
@@ -2164,6 +2178,13 @@ window.__ModuleLoader__.load({
 							) : null
 						) : null
 					)
+				),
+				// Hidden full-width row: every action at natural size, the only
+				// thing the overflow measurement reads (never the visible strip).
+				h("div", { className: "am-actions-measure", ref: measureRef, "aria-hidden": "true" },
+					actions.map(function (action) {
+						return h("span", { key: action.key, className: "am-btn" }, action.label);
+					})
 				),
 				h("div", { className: "am-card-body" },
 					h("span", { className: "am-tool-name", title: summary }, summary),
