@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Original artwork: three agent nodes connected through a shared core, filling the canvas -->
+  <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 12 L12 5.2"/>
+    <path d="M12 12 L17.6 15.4"/>
+    <path d="M12 12 L6.4 15.4"/>
+  </g>
+  <circle cx="12" cy="12" r="2.6" fill="currentColor"/>
+  <circle cx="12" cy="4" r="2.1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  <circle cx="19.2" cy="16.4" r="2.1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+  <circle cx="4.8" cy="16.4" r="2.1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+</svg>

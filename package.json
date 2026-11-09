@@ -1,0 +1,59 @@
+{
+  "name": "dsh-agents-manager",
+  "version": "0.4.0",
+  "description": "AI enhancement plugin for DeepSeek Harness (settings page shown as \"MCP & Skills\"): visual management of MCP servers, Skills, subagent roles & model pools, automatic model-request retry (provider policies + vendor-expression rules + cross-restart monitor), and per-session service-process panels — settings pages, ~/.agents config, MCP testing, tools & per-card enable toggles, skill editing, delegation roles with per-call model selection, and the report_service_process callback tool.",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "mcp",
+    "skills",
+    "subagents",
+    "retry"
+  ],
+  "type": "module",
+  "main": "src/host/index.js",
+  "exports": {
+    ".": "./src/host/index.js",
+    "./client": "./client/client.js",
+    "./subagents": "./src/host/features/subagents.js",
+    "./retry": "./src/host/features/retry.js",
+    "./processes": "./src/host/features/processes.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  },
+  "scripts": {
+    "test": "node --test 'test/**/*.test.mjs'"
+  },
+  "devDependencies": {
+    "react": "18.3.1",
+    "react-test-renderer": "18.3.1"
+  }
+}
