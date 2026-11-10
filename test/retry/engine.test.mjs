@@ -188,7 +188,7 @@ test('budget: exhausted rule defers downstream', async () => {
 test('turn advance resets the per-rule budget', async () => {
   const rules = makeRules([{ ...ZHIPU_RULE, maxRetries: 1, wait: { kind: 'retry-after', defaultMs: 30000 } }]);
   const recorder = makeRecorder();
-  const engine = createRetryEngine({ rules: rules.get, onRetry: recorder.onRetry, now });
+  const engine = createRetryEngine({ rules: rules.get, onRetry: recorder.onRetry, now, abortWaitsOnDispose: true });
   clock = Date.UTC(2026, 8, 22, 5, 0, 0);
   // Turn 1: consume the budget; cancel the wait after scheduling.
   const turnOneController = new AbortController();
@@ -242,10 +242,10 @@ test('abort signal cancels the wait and returns no retry', async () => {
   engine.dispose();
 });
 
-test('dispose aborts in-flight waits and drains', async () => {
+test('dispose aborts in-flight waits and drains when explicitly requested', async () => {
   const rules = makeRules([{ ...ZHIPU_RULE, wait: { kind: 'retry-after', defaultMs: 1000 } }]);
   const recorder = makeRecorder();
-  const engine = createRetryEngine({ rules: rules.get, onRetry: recorder.onRetry, now });
+  const engine = createRetryEngine({ rules: rules.get, onRetry: recorder.onRetry, now, abortWaitsOnDispose: true });
   clock = Date.UTC(2026, 8, 22, 5, 0, 0);
   const pending = engine.onRequestError(makePayload(), async () => undefined);
   const drained = engine.dispose();
@@ -264,4 +264,19 @@ test('status() reports waiting waits', async () => {
   await engine.dispose();
   await pending;
   assert.equal(engine.status().waiting, 0);
+});
+
+
+test('dispose keeps an in-flight wait alive (plugin-row hot reload must not kill the retry)', async () => {
+  const rules = makeRules([{ name: 'fixed', when: '[\\s\\S]+', flags: 'i', wait: { kind: 'fixed', ms: 1000 }, maxRetries: 2 }]);
+  const recorder = makeRecorder();
+  const engine = createRetryEngine({ rules: rules.get, onRetry: recorder.onRetry, now });
+  const pending = engine.onRequestError(makePayload(), async () => undefined);
+  assert.equal(engine.status().waiting, 1);
+  // Row disposed by a loader rebuild mid-wait: the pending promise must still
+  // resolve to a retry once the timer elapses.
+  await engine.dispose();
+  await assert.doesNotReject(pending);
+  assert.deepEqual(await pending, { kind: 'retry' });
+  assert.ok(recorder.events.some((event) => event.phase === 'started'), 'started phase fired after reload');
 });

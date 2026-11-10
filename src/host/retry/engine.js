@@ -62,12 +62,21 @@ function cancellableDelay(delayMs, signal) {
  *        answerable). Called synchronously right before the pass-through.
  * @param {(message: string) => void} [options.log] - diagnostic sink.
  * @param {() => number} [options.now] - injectable clock.
+ * @param {boolean} [options.abortWaitsOnDispose] - abort in-flight waits when the
+ *        row is disposed. Default false: a loader hot-reload (plugin-market
+ *        update of ANY plugin rebuilds rows) must not kill a scheduled retry
+ *        that the agent loop is still awaiting — the wait keeps its turn
+ *        alive and resolves `{kind:'retry'}` even if this module instance is
+ *        gone. Only server shutdown (process exit) and explicit disposal with
+ *        this flag end waits early.
  * @returns {object} engine handle: `{ install(ctx), dispose(), status() }`.
  */
 export function createRetryEngine(options) {
   const log = options.log ?? (() => {});
   const now = options.now ?? (() => Date.now());
   const lifetime = new AbortController();
+  /** See options.abortWaitsOnDispose: reload-safe by default. */
+  const abortWaitsOnDispose = options.abortWaitsOnDispose === true;
   /** Active waits, drained on dispose. */
   const active = new Set();
   /** Per (sessionKey, ruleName) hit counts within the current turn. */
@@ -94,9 +103,16 @@ export function createRetryEngine(options) {
     return { waiting: active.size };
   }
 
-  /** Stop the engine: abort every in-flight wait and drain. */
+  /**
+   * Stop the engine. By default in-flight waits are LEFT RUNNING: their owning
+   * agent loop is still awaiting the returned promise, and a plugin-row
+   * hot-reload (loader rebuild triggered by any plugin-market update) must not
+   * turn a scheduled retry into a failed turn. The listener is removed either
+   * way, so no NEW wait can start from this instance. Pass
+   * `abortWaitsOnDispose: true` (tests / explicit teardown) to cancel them.
+   */
   function dispose() {
-    lifetime.abort(new Error('retry engine disposed'));
+    if (abortWaitsOnDispose) lifetime.abort(new Error('retry engine disposed'));
     const pending = [...active];
     active.clear();
     budgets.clear();

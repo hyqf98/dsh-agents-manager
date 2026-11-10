@@ -381,7 +381,7 @@
       "pluginRule": "rule",
       "builtin": "built-in",
       "aiTools": "AI tools: read_retry_state · test_retry_rule · write_retry_rules",
-      "persistHint": "Recent events survive restarts (last 100, including failures that scheduled no retry); in-flight waits die with the host.",
+      "persistHint": "Recent events survive restarts (last 100, including failures that scheduled no retry); in-flight waits survive plugin-row hot reloads and end only with the DSH process.",
       "failureRow": "No retry",
       "reason": {
         "no-rules": "no rules configured (import or create one)",

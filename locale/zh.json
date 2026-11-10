@@ -381,7 +381,7 @@
       "pluginRule": "规则",
       "builtin": "内核",
       "aiTools": "AI 工具：read_retry_state · test_retry_rule · write_retry_rules",
-      "persistHint": "最近事件跨重启保留最近 100 条（含未触发重试的失败）；进行中的等待随宿主重启消失。",
+      "persistHint": "最近事件跨重启保留最近 100 条（含未触发重试的失败）；进行中的等待在插件行热更新时继续有效，只有整个 DSH 进程退出才会终止。",
       "failureRow": "未重试",
       "reason": {
         "no-rules": "无规则可匹配（尚未导入或新建规则）",
