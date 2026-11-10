@@ -359,6 +359,9 @@ window.__ModuleLoader__.load({
 			"subagents.pool.field.usage": "用途描述（模型可见，如：用于视觉 / 复杂任务 / 决策模型）",
 			"subagents.pool.field.effort": "默认推理强度",
 			"subagents.pool.enabled": "启用",
+			"subagents.pool.unexposed": "未暴露给主模型",
+			"subagents.pool.exposeHint": "勾选后该模型出现在 list_delegation_models 与「向主 Agent 开放整个模型池」的选择列表里；不勾选则仅保留在模型池中，主模型看不到。",
+			"subagents.pool.expose": "暴露给主模型",
 			"subagents.pool.delConfirm": "确定删除该模型？",
 			"subagents.pool.usageEmpty": "（未写用途）",
 			"subagents.pool.importAll": "自动同步设置页模型",
@@ -374,7 +377,7 @@ window.__ModuleLoader__.load({
 			"subagents.role.decision.apiKey": "API Key（可选）",
 			"subagents.role.decision.hint": "委派未显式指定模型时，先调用该决策模型从候选中选择；失败自动回退候选链首位。",
 			"subagents.role.openPool": "向主 Agent 开放整个模型池",
-			"subagents.role.openPoolHint": "开启后该角色工具的模型枚举为模型池全部启用模型，主 Agent 按用途描述自行决策。",
+			"subagents.role.openPoolHint": "开启后该角色工具的模型枚举为模型池中已启用且勾选「暴露给主模型」的模型，主 Agent 按用途描述自行决策。",
 			"subagents.role.caps": "子代理能力（MCP / 技能）",
 			"subagents.role.caps.hint": "限制该角色的子代理可用的 MCP 服务器与技能；两组默认跟随调用会话的选择，也可按角色固定一份白名单。",
 			"subagents.field.category": "分组（可选）",
@@ -699,6 +702,9 @@ window.__ModuleLoader__.load({
 			"subagents.pool.field.usage": "Usage description (model-visible, e.g. vision / heavy tasks / decision model)",
 			"subagents.pool.field.effort": "Default reasoning effort",
 			"subagents.pool.enabled": "Enabled",
+			"subagents.pool.unexposed": "Not exposed to the main model",
+			"subagents.pool.exposeHint": "When checked, this model appears in list_delegation_models and in the \"expose the whole model pool\" delegate list; unchecked entries stay in the pool but are hidden from the main model.",
+			"subagents.pool.expose": "Expose to the main model",
 			"subagents.pool.delConfirm": "Delete this model?",
 			"subagents.pool.usageEmpty": "(no usage yet)",
 			"subagents.pool.importAll": "Auto-sync settings-page models",
@@ -714,7 +720,7 @@ window.__ModuleLoader__.load({
 			"subagents.role.decision.apiKey": "API key (optional)",
 			"subagents.role.decision.hint": "When the call omits the model, the decision model picks from the candidates first; failures fall back to the first candidate.",
 			"subagents.role.openPool": "Expose the whole model pool to the main agent",
-			"subagents.role.openPoolHint": "The tool model enum becomes every enabled pool model; the main agent decides from the usage descriptions.",
+			"subagents.role.openPoolHint": "The tool model enum becomes every pool model that is enabled AND exposed to the main model; the main agent decides from the usage descriptions.",
 			"subagents.role.caps": "Subagent capabilities (MCP / skills)",
 			"subagents.role.caps.hint": "Restrict which MCP servers and skills this role's subagents may use; both groups follow the calling session's selection by default, or pin a per-role whitelist.",
 			"subagents.field.category": "Group (optional)",
@@ -4186,6 +4192,10 @@ window.__ModuleLoader__.load({
 			var setEffort = effort[1]; effort = effort[0];
 			var enabled = useState(entry.enabled !== false);
 			var setEnabled = enabled[1]; enabled = enabled[0];
+			// Whether the main model sees this entry in list_delegation_models
+			// and in openPool delegate model enums. Absent = exposed.
+			var expose = useState(entry.expose !== false);
+			var setExpose = expose[1]; expose = expose[0];
 			var error = useState("");
 			var setError = error[1]; error = error[0];
 			var busy = useState(false);
@@ -4229,6 +4239,7 @@ window.__ModuleLoader__.load({
 				if (displayName !== "" && displayName !== model.trim()) payload.name = displayName;
 				if (usage.trim() !== "") payload.description = usage.trim();
 				if (effort !== "") payload.reasoningEffort = effort;
+				payload.expose = expose === true;
 				setBusy(true);
 				api.savePoolModel(payload).then(function (response) {
 					setBusy(false);
@@ -4265,10 +4276,17 @@ window.__ModuleLoader__.load({
 				h(Field, { label: t("subagents.pool.field.usage") },
 					h("textarea", { className: "am-textarea", style: { minHeight: "64px" }, value: usage, onChange: function (event) { setUsage(event.target.value); } })
 				),
-				h("label", { className: "am-check" },
-					h("input", { type: "checkbox", checked: enabled, onChange: function (event) { setEnabled(event.target.checked); } }),
-					h("span", null, t("subagents.pool.enabled"))
+				h("div", { className: "am-row" },
+					h("label", { className: "am-check" },
+						h("input", { type: "checkbox", checked: enabled, onChange: function (event) { setEnabled(event.target.checked); } }),
+						h("span", null, t("subagents.pool.enabled"))
+					),
+					h("label", { className: "am-check", title: t("subagents.pool.exposeHint") },
+						h("input", { type: "checkbox", checked: expose, onChange: function (event) { setExpose(event.target.checked); } }),
+						h("span", null, t("subagents.pool.expose"))
+					)
 				),
+				expose ? null : h("p", { className: "am-hint", style: { margin: 0 } }, t("subagents.pool.exposeHint")),
 				error === "" ? null : h("p", { className: "am-error", role: "alert" }, error)
 			)
 		);
@@ -4591,6 +4609,7 @@ window.__ModuleLoader__.load({
 								h("div", { className: "am-card-head" },
 									h("span", { className: "am-dot", "data-tone": entry.enabled === false ? "idle" : "ok" }),
 									h("span", { className: "am-card-name" }, entry.name || entry.model),
+									entry.expose === false ? h("span", { className: "am-badge", "data-tone": "idle" }, t("subagents.pool.unexposed")) : null,
 									h("span", { className: "am-spacer" }),
 									h("button", { type: "button", className: "am-btn", "data-size": "sm", onClick: function () { setEditingPool({ entry: entry }); } }, t("subagents.edit")),
 									h("button", { type: "button", className: "am-btn", "data-size": "sm", "data-variant": "danger", onClick: function () {

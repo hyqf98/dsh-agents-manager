@@ -48,7 +48,10 @@ export function parseRouteKey(key) {
  */
 export function resolveCandidates(role, pool) {
   if (role.openPool === true) {
-    return (pool ?? []).filter((entry) => entry.enabled !== false);
+    // Only enabled AND exposed entries are offered to the main model; an
+    // unexposed pool entry stays usable for explicit role candidates but
+    // never appears in the delegate model enum.
+    return (pool ?? []).filter((entry) => entry.enabled !== false && entry.expose !== false);
   }
   return (role.models ?? []).map((candidate) => {
     const pooled = (pool ?? []).find((entry) => entry.provider === candidate.provider && entry.model === candidate.model);
@@ -111,7 +114,7 @@ export async function decideRemote(decision, task, candidates, fetchImpl) {
 export function poolListing(pool) {
   const lines = [];
   for (const entry of pool ?? []) {
-    if (entry.enabled === false) continue;
+    if (entry.enabled === false || entry.expose === false) continue;
     const parts = [`${entry.provider}/${entry.model}`];
     if (entry.name !== undefined) parts.push(entry.name);
     lines.push(parts.join(' — ') + (entry.description === undefined ? '' : `: ${entry.description}`) + (entry.reasoningEffort === undefined ? '' : ` (default effort: ${entry.reasoningEffort})`));
@@ -467,7 +470,7 @@ export function buildRoleTool(roleName, role, services, pool = [], log = () => {
 }
 
 export function buildPoolListTool(pool = []) {
-  const enabled = (pool ?? []).filter((entry) => entry.enabled !== false);
+  const enabled = (pool ?? []).filter((entry) => entry.enabled !== false && entry.expose !== false);
   if (enabled.length === 0) return null;
   return {
     name: 'list_delegation_models',

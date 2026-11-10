@@ -4,6 +4,7 @@ import {
   createSubagentsStore,
   DOMAIN_SPEC,
   normalizeRole,
+  normalizePoolModel,
   normalizeDocument,
   sanitizeRoleName,
 } from '../../src/host/subagents/store.js';
@@ -200,4 +201,18 @@ test('normalizeDocument validates the whole fallback document', () => {
   assert.equal(broken.ok, false);
   assert.match(broken.error, /^bad:/);
   assert.equal(normalizeDocument([]).error, 'not-object');
+});
+
+
+test('normalizePoolModel carries the expose flag (absent means exposed)', () => {
+  const plain = normalizePoolModel({ provider: 'p1', model: 'm1' });
+  assert.equal(plain.ok, true);
+  assert.equal(plain.entry.expose, true, 'legacy entries stay exposed');
+
+  const hidden = normalizePoolModel({ provider: 'p1', model: 'm1', expose: false });
+  assert.equal(hidden.ok, true);
+  assert.equal(hidden.entry.expose, false);
+
+  const truthy = normalizePoolModel({ provider: 'p1', model: 'm1', expose: 'yes' });
+  assert.equal(truthy.entry.expose, false, 'only explicit true counts');
 });

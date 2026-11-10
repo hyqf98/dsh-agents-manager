@@ -331,6 +331,10 @@ export function normalizePoolModel(raw) {
     provider: source.provider.trim(),
     model: source.model.trim(),
     enabled: source.enabled === undefined ? true : source.enabled === true,
+    // Whether the main model may see this entry in list_delegation_models
+    // and in openPool delegate model enums. Absent = exposed (backwards
+    // compatible with entries stored before the field existed).
+    expose: source.expose === undefined ? true : source.expose === true,
   };
   for (const [field, code] of /** @type {Array<[string, string]>} */ ([['name', 'bad-name'], ['description', 'bad-description'], ['reasoningEffort', 'bad-effort']])) {
     if (source[field] !== undefined && source[field] !== null) {

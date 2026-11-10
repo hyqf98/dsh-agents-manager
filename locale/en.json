@@ -216,7 +216,7 @@
     "pool.usageEmpty": "(no usage yet)",
     "role.fromPool": "Add candidate from the pool",
     "role.openPool": "Expose the whole model pool to the main agent",
-    "role.openPoolHint": "The tool model enum becomes every enabled pool model; the main agent decides from the usage descriptions.",
+    "role.openPoolHint": "The tool model enum becomes every pool model that is enabled AND exposed to the main model; the main agent decides from the usage descriptions.",
     "role.caps": "Subagent capabilities (MCP / skills)",
     "role.caps.hint": "Restrict which MCP servers and skills this role's subagents may use; both groups follow the calling session's selection by default, or pin a per-role whitelist.",
     "role.caps.mcp": "MCP servers",
@@ -247,7 +247,10 @@
     "group.other": "Ungrouped",
     "group.count": "{n} roles",
     "group.expand": "Expand",
-    "group.collapse": "Collapse"
+    "group.collapse": "Collapse",
+    "pool.expose": "Expose to the main model",
+    "pool.exposeHint": "When checked, this model appears in list_delegation_models and in the \"expose the whole model pool\" delegate list; unchecked entries stay in the pool but are hidden from the main model.",
+    "pool.unexposed": "Not exposed to the main model"
   },
   "retry": {
     "pageTitle": "Auto Retry",

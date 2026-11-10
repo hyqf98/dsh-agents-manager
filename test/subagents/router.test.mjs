@@ -214,6 +214,7 @@ test('pool overlay: pool descriptions win, openPool exposes the whole pool', () 
     { provider: 'p1', model: 'm1', description: '用于视觉', enabled: true },
     { provider: 'p2', model: 'm2', description: '复杂推理', reasoningEffort: 'high', enabled: true },
     { provider: 'p3', model: 'm3', enabled: false },
+    { provider: 'p4', model: 'm4', description: '内部备用', enabled: true, expose: false },
   ];
   const role = { ...ROLE, models: [{ provider: 'p1', model: 'm1' }, { provider: 'px', model: 'mx' }] };
   const resolved = resolveCandidates(role, pool);
@@ -223,11 +224,14 @@ test('pool overlay: pool descriptions win, openPool exposes the whole pool', () 
   assert.deepEqual(open.map(routeKey), ['p1/m1', 'p2/m2']);
   assert.match(poolListing(pool), /p1\/m1: 用于视觉/);
   assert.match(poolListing(pool), /p2\/m2: 复杂推理 \(default effort: high\)/);
+  assert.doesNotMatch(poolListing(pool), /p4\/m4/, 'unexposed entries never reach the main model');
   const tool = buildRoleTool('r', { ...role, openPool: true }, { subagents: stubSeam() }, pool);
   assert.deepEqual(tool.parameters.properties.model.enum, ['p1/m1', 'p2/m2']);
   const listTool = buildPoolListTool(pool);
   assert.equal(listTool.name, 'list_delegation_models');
   assert.equal(buildPoolListTool([]), null);
+  // A pool of only unexposed entries exposes no list tool at all.
+  assert.equal(buildPoolListTool([{ provider: 'p4', model: 'm4', enabled: true, expose: false }]), null);
 });
 
 test('empty candidates: role inherits parent model, no model param, no crash', async () => {

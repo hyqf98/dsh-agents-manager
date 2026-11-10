@@ -216,7 +216,7 @@
     "pool.usageEmpty": "（未写用途）",
     "role.fromPool": "从模型池添加候选",
     "role.openPool": "向主 Agent 开放整个模型池",
-    "role.openPoolHint": "开启后该角色工具的模型枚举为模型池全部启用模型，主 Agent 按用途描述自行决策。",
+    "role.openPoolHint": "开启后该角色工具的模型枚举为模型池中已启用且勾选「暴露给主模型」的模型，主 Agent 按用途描述自行决策。",
     "role.caps": "子代理能力（MCP / 技能）",
     "role.caps.hint": "限制该角色的子代理可用的 MCP 服务器与技能；两组默认跟随调用会话的选择，也可按角色固定一份白名单。",
     "role.caps.mcp": "MCP 服务器",
@@ -247,7 +247,10 @@
     "group.other": "未分组",
     "group.count": "{n} 个角色",
     "group.expand": "展开",
-    "group.collapse": "折叠"
+    "group.collapse": "折叠",
+    "pool.expose": "暴露给主模型",
+    "pool.exposeHint": "勾选后该模型出现在 list_delegation_models 与「向主 Agent 开放整个模型池」的选择列表里；不勾选则仅保留在模型池中，主模型看不到。",
+    "pool.unexposed": "未暴露给主模型"
   },
   "retry": {
     "pageTitle": "自动重试",
