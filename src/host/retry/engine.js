@@ -112,7 +112,6 @@ export function createRetryEngine(options) {
    * `abortWaitsOnDispose: true` (tests / explicit teardown) to cancel them.
    */
   function dispose() {
-    if (abortWaitsOnDispose) lifetime.abort(new Error('retry engine disposed'));
     const pending = [...active];
     active.clear();
     budgets.clear();
@@ -122,6 +121,8 @@ export function createRetryEngine(options) {
     } catch { /* listener already gone */ }
     disposer = null;
     installed = false;
+    if (!abortWaitsOnDispose) return Promise.resolve([]);
+    lifetime.abort(new Error('retry engine disposed'));
     return Promise.allSettled(pending);
   }
 
