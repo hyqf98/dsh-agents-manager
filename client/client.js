@@ -1311,6 +1311,16 @@ window.__ModuleLoader__.load({
 		function AmSelect(props) {
 			var value = typeof props.value === "string" ? props.value : "";
 			var options = props.options || [];
+			// A carried value that is not among the advertised options (custom
+			// model id, catalog without this entry) stays visible as a pinned
+			// first option instead of rendering a label the list cannot show.
+			if (value !== "" && props.keepValue !== false) {
+				var knownValue = false;
+				for (var vi = 0; vi < options.length; vi += 1) {
+					if (options[vi].value === value) { knownValue = true; break; }
+				}
+				if (!knownValue) options = [{ value: value, label: value }].concat(options);
+			}
 			var open = useState(false);
 			var setOpen = open[1]; open = open[0];
 			var wrapRef = useRef(null);
@@ -3233,15 +3243,21 @@ window.__ModuleLoader__.load({
 				return [];
 			}
 
-			/** Reasoning-effort options advertised for one provider/model pair. */
+			/** Efforts most providers share; offered when the catalog's entry for
+			 *  the chosen model advertises none, so the dropdown is never empty
+			 *  and the value stays freely editable (allowCustom). */
+			var COMMON_EFFORTS = ["minimal", "low", "medium", "high"];
+
+			/** Reasoning-effort options for one provider/model pair: catalog
+			 *  first, common fallback second, always open to custom entry. */
 			function effortOptionsOf(providerId, modelId) {
 				var options = modelOptionsOf(providerId);
 				for (var i2 = 0; i2 < options.length; i2++) {
-					if (options[i2].value === modelId) {
+					if (options[i2].value === modelId && options[i2].efforts.length > 0) {
 						return options[i2].efforts.map(function (effort) { return { value: effort, label: effort }; });
 					}
 				}
-				return [];
+				return COMMON_EFFORTS.map(function (effort) { return { value: effort, label: effort }; });
 			}
 
 			/** Models the Models settings page advertises for one provider (empty when unknown). */
@@ -3341,6 +3357,7 @@ window.__ModuleLoader__.load({
 									value: row.reasoningEffort,
 									options: effortOptionsOf(row.provider, row.model),
 									placeholder: t("subagents.model.effort"),
+									allowCustom: true,
 									onChange: function (next) { patchModel(index, { reasoningEffort: next }); }
 								})
 							),
@@ -4132,6 +4149,11 @@ window.__ModuleLoader__.load({
 			var setProvider = provider[1]; provider = provider[0];
 			var model = useState(entry.model || "");
 			var setModel = model[1]; model = model[0];
+			// The display name defaults to the model id and follows model changes
+			// while the user has not typed their own (empty = follow).
+			var nameTouched = useState(entry.name !== undefined && entry.name !== null && entry.name !== "");
+			var setNameTouched = nameTouched[1];
+			nameTouched = nameTouched[0];
 			var name_ = useState(entry.name || "");
 			var setName = name_[1]; name_ = name_[0];
 			var usage = useState(entry.description || "");
@@ -4164,17 +4186,23 @@ window.__ModuleLoader__.load({
 				for (var i = 0; i < catalog.length; i++) {
 					if (catalog[i].id !== provider) continue;
 					for (var j = 0; j < (catalog[i].models || []).length; j++) {
-						if (catalog[i].models[j].id === model) return (catalog[i].models[j].efforts || []).map(function (e) { return { value: e, label: e }; });
+						if (catalog[i].models[j].id === model) {
+							var advertised = (catalog[i].models[j].efforts || []).map(function (e) { return { value: e, label: e }; });
+							if (advertised.length > 0) return advertised;
+						}
 					}
 				}
-				return [];
+				// Most providers do not advertise efforts; offer the common set.
+				return ["minimal", "low", "medium", "high"].map(function (e) { return { value: e, label: e }; });
 			}
 
 			function save() {
 				if (provider.trim() === "" || model.trim() === "") { setError(t("subagents.needModels")); return; }
 				/** @type {object} */
 				var payload = { provider: provider.trim(), model: model.trim(), enabled: enabled === true };
-				if (name_.trim() !== "") payload.name = name_.trim();
+				// Empty display name = default echo of the model id; a typed name wins.
+				var displayName = nameTouched === true && name_.trim() !== "" ? name_.trim() : model.trim();
+				if (displayName !== "" && displayName !== model.trim()) payload.name = displayName;
 				if (usage.trim() !== "") payload.description = usage.trim();
 				if (effort !== "") payload.reasoningEffort = effort;
 				setBusy(true);
@@ -4204,7 +4232,7 @@ window.__ModuleLoader__.load({
 				),
 				h("div", { className: "am-row" },
 					h(Field, { label: t("subagents.pool.field.name") },
-						h("input", { className: "am-input", value: name_, onChange: function (event) { setName(event.target.value); } })
+						h("input", { className: "am-input", placeholder: model === "" ? t("subagents.model.id") : model, value: nameTouched === true ? name_ : "", onChange: function (event) { setNameTouched(true); setName(event.target.value); } })
 					),
 					h(Field, { label: t("subagents.pool.field.effort") },
 						h(AmSelect, { value: effort, options: effortOptions(), placeholder: t("subagents.pool.field.effort"), allowCustom: true, onChange: setEffort })
@@ -4329,8 +4357,10 @@ window.__ModuleLoader__.load({
 				var missing = entries.filter(function (entry) { return known[entry.provider + "/" + entry.model] !== true; });
 				if (missing.length === 0) return;
 				api.bulkPoolModels(missing).then(function (response) {
-					if (response.ok && response.body.imported.length > 0) {
-						setNotice(format(t("subagents.pool.importAll.done"), { n: response.body.imported.length, s: response.body.skipped.length }));
+					var imported = (response.ok && response.body && response.body.imported) || [];
+					var skipped = (response.ok && response.body && response.body.skipped) || [];
+					if (imported.length > 0) {
+						setNotice(format(t("subagents.pool.importAll.done"), { n: imported.length, s: skipped.length }));
 						load();
 					}
 				}, function () { /* auto-seed is best-effort */ });
@@ -4504,6 +4534,7 @@ window.__ModuleLoader__.load({
 									} }, t("subagents.del"))
 								),
 								h("div", { className: "am-card-body" }, entry.model + (entry.reasoningEffort ? " · " + entry.reasoningEffort : "")),
+								entry.name !== undefined && entry.name !== entry.model ? h("div", { className: "am-card-body" }, entry.name) : null,
 								h("div", { className: "am-card-body" }, entry.description || t("subagents.pool.usageEmpty"))
 							);
 						})
