@@ -242,7 +242,12 @@
     "pool.importAll": "自动同步设置页模型",
     "pool.importAll.hint": "打开模型池时自动把「设置 → 模型」页的全部模型铺进来（缺的才加），你只需补用途描述。",
     "pool.importAll.done": "已自动同步 {n} 个新模型进池，请补充用途描述",
-    "pool.importAll.empty": "设置页没有可同步的模型"
+    "pool.importAll.empty": "设置页没有可同步的模型",
+    "field.category": "分组（可选）",
+    "group.other": "未分组",
+    "group.count": "{n} 个角色",
+    "group.expand": "展开",
+    "group.collapse": "折叠"
   },
   "retry": {
     "pageTitle": "自动重试",

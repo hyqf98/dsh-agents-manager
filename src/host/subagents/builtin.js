@@ -33,11 +33,12 @@
  * The built-in role catalog. Order is the display/tool order; names are
  * kebab-case and stay within MAX_ROLE_NAME (23) so `delegate_<name>` holds.
  *
- * @type {Array<{ name: string, description: string, promptPrefix: string, enabled: boolean, openPool: boolean, models: Array<object> }>}
+ * @type {Array<{ name: string, category: string, description: string, promptPrefix: string, enabled: boolean, openPool: boolean, models: Array<object> }>}
  */
 export const BUILTIN_ROLES = [
   {
     name: 'frontend-dev',
+    category: '开发',
     description: '资深前端开发：React / Vue 3 + TypeScript 组件与页面实现、状态与样式、交互态与可访问性。实现或修复前端功能、对接接口做界面渲染时使用。',
     enabled: true,
     openPool: true,
@@ -71,6 +72,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'backend-dev',
+    category: '开发',
     description: '资深后端开发：API、业务逻辑、数据建模与迁移的生产级实现，契约优先。实现或修复服务端功能、写接口与数据变更时使用。',
     enabled: true,
     openPool: true,
@@ -103,6 +105,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'test-engineer',
+    category: '测试',
     description: '资深测试工程师：单元 / 集成 / 端到端测试编写，先失败后转绿，缺陷先复现。补测试、修 bug 前写复现用例、制定测试策略时使用。',
     enabled: true,
     openPool: true,
@@ -135,6 +138,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'architect',
+    category: '设计',
     description: '架构与技术选型专家（只读）：候选方案对比、trade-off 分析、ADR 决策文档与接口设计。技术选型、方案评审、整体架构决策时使用。',
     enabled: true,
     openPool: true,
@@ -164,6 +168,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'product-designer',
+    category: '设计',
     description: '资深产品设计：需求澄清与 PRD（用户故事、优先级、验收标准）。把想法或模糊需求变成可开发、可验收的需求文档时使用。',
     enabled: true,
     openPool: true,
@@ -200,6 +205,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'visual-expert',
+    category: '设计',
     description: '视觉与体验专家（只读）：证据驱动的设计评审、设计 token 与组件状态规范、可访问性检查。UI 走查、视觉规范制定、体验问题诊断时使用。',
     enabled: true,
     openPool: true,
@@ -228,6 +234,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'effort-estimator',
+    category: '规划',
     description: '工时评估专家：自底向上分解 + PERT 三点估算 + P50/P80 区间 + 假设清单。评估开发工时、给排期提供依据时使用。',
     enabled: true,
     openPool: true,
@@ -256,6 +263,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'task-planner',
+    category: '规划',
     description: '任务规划专家：把已确认的需求 / 设计转成依赖有序、带文件 / 接口签名 / 验证命令的执行计划。开发前拆解任务、制定实施计划时使用。',
     enabled: true,
     openPool: true,
@@ -292,6 +300,7 @@ export const BUILTIN_ROLES = [
   },
   {
     name: 'code-reviewer',
+    category: '质量',
     description: '资深代码评审（只读）：按正确性 / 安全 / 性能 / 可维护性 / 测试覆盖逐文件分级评审。变更评审、合并前检查、质量走查时使用。',
     enabled: true,
     openPool: true,

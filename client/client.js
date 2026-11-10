@@ -377,6 +377,11 @@ window.__ModuleLoader__.load({
 			"subagents.role.openPoolHint": "开启后该角色工具的模型枚举为模型池全部启用模型，主 Agent 按用途描述自行决策。",
 			"subagents.role.caps": "子代理能力（MCP / 技能）",
 			"subagents.role.caps.hint": "限制该角色的子代理可用的 MCP 服务器与技能；两组默认跟随调用会话的选择，也可按角色固定一份白名单。",
+			"subagents.field.category": "分组（可选）",
+			"subagents.group.other": "未分组",
+			"subagents.group.count": "{n} 个角色",
+			"subagents.group.expand": "展开",
+			"subagents.group.collapse": "折叠",
 			"subagents.role.caps.mcp": "MCP 服务器",
 			"subagents.role.caps.skills": "技能",
 			"subagents.role.caps.follow": "跟随会话选择",
@@ -712,6 +717,11 @@ window.__ModuleLoader__.load({
 			"subagents.role.openPoolHint": "The tool model enum becomes every enabled pool model; the main agent decides from the usage descriptions.",
 			"subagents.role.caps": "Subagent capabilities (MCP / skills)",
 			"subagents.role.caps.hint": "Restrict which MCP servers and skills this role's subagents may use; both groups follow the calling session's selection by default, or pin a per-role whitelist.",
+			"subagents.field.category": "Group (optional)",
+			"subagents.group.other": "Ungrouped",
+			"subagents.group.count": "{n} roles",
+			"subagents.group.expand": "Expand",
+			"subagents.group.collapse": "Collapse",
 			"subagents.role.caps.mcp": "MCP servers",
 			"subagents.role.caps.skills": "Skills",
 			"subagents.role.caps.follow": "Follow session selection",
@@ -829,6 +839,13 @@ window.__ModuleLoader__.load({
 			".am-more-item:disabled { opacity: .45; cursor: default; }",
 			".am-more-item[data-variant='danger'] { color: var(--dsw-alias-state-error-primary); }",
 			".am-more-item .am-more-desc { color: var(--dsw-alias-label-secondary); font-size: 11px; margin-left: auto; padding-left: 12px; }",
+			".am-role-group { display: flex; flex-direction: column; gap: 8px; }",
+			".am-role-group-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 2px; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: left; border-radius: 7px; }",
+			".am-role-group-head:hover { background: var(--dsw-alias-interactive-bg-hover); }",
+			".am-role-group-chev { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--dsw-alias-label-secondary); transition: transform .14s ease; }",
+			".am-role-group-head[aria-expanded=true] .am-role-group-chev { transform: rotate(90deg); }",
+			".am-role-group-title { flex: none; }",
+			".am-role-group-count { color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 400; }",
 			/* ---- host plugin detail page: hide our rows' technical id tags ----
 			 * The manager page renders the row title (our locale meta.title) plus
 			 * <code> tags for the entry id and module specifier. Ours duplicate
@@ -3089,6 +3106,9 @@ window.__ModuleLoader__.load({
 			var description = useState(props.role ? props.role.description : "");
 			var setDescription = description[1];
 			description = description[0];
+			var category = useState(props.role && typeof props.role.category === "string" ? props.role.category : "");
+			var setCategory = category[1];
+			category = category[0];
 			var promptPrefix = useState(props.role && props.role.promptPrefix ? props.role.promptPrefix : "");
 			var setPromptPrefix = promptPrefix[1];
 			promptPrefix = promptPrefix[0];
@@ -3174,6 +3194,7 @@ window.__ModuleLoader__.load({
 						return candidate;
 					})
 				};
+				if (category.trim() !== "") role.category = category.trim();
 				if (promptPrefix.trim() !== "") role.promptPrefix = promptPrefix;
 				if (preset.trim() !== "") role.preset = preset.trim();
 				if (openPool) role.openPool = true;
@@ -3290,6 +3311,9 @@ window.__ModuleLoader__.load({
 					),
 					h(Field, { label: t("subagents.field.description") },
 						h("input", { className: "am-input", value: description, onChange: function (event) { setDescription(event.target.value); } })
+					),
+					h(Field, { label: t("subagents.field.category") },
+						h("input", { className: "am-input", value: category, onChange: function (event) { setCategory(event.target.value); }, placeholder: t("subagents.field.category"), maxLength: 40 })
 					),
 					h("div", { className: "am-row" },
 						h(Field, { label: t("subagents.field.preset") },
@@ -4394,6 +4418,27 @@ window.__ModuleLoader__.load({
 				exportableRoles[nameKey] = roles[nameKey];
 			});
 
+			// Role cards fold by category (the role's optional `category`; the
+			// nine builtins ship one). Every group starts COLLAPSED: the open
+			// set records only groups the user expanded, so null/{} = all folded.
+			var openGroups = useState(null);
+			var setOpenGroups = openGroups[1];
+			openGroups = openGroups[0];
+			var groupsOf = function (names) {
+				var byGroup = {};
+				var order = [];
+				names.forEach(function (nameKey) {
+					var cat = (roles[nameKey] && typeof roles[nameKey].category === "string" && roles[nameKey].category !== "") ? roles[nameKey].category : null;
+					var key = cat === null ? "\u0000" : cat;
+					if (byGroup[key] === undefined) { byGroup[key] = { label: cat, names: [] }; order.push(key); }
+					byGroup[key].names.push(nameKey);
+				});
+				// Named groups first (in first-appearance order), the ungrouped tail last.
+				var firstSeen = order.indexOf("\u0000");
+				var ungrouped = firstSeen >= 0 ? order.splice(firstSeen, 1) : [];
+				return order.map(function (key) { return byGroup[key]; }).concat(ungrouped.map(function (key) { return byGroup[key]; }));
+			};
+
 			// Capability catalog for the role editor's MCP/skill whitelist:
 			// loaded best-effort alongside the roles (missing → editor shows
 			// its empty states but still saves a whitelist of unknown names).
@@ -4433,9 +4478,30 @@ window.__ModuleLoader__.load({
 				!needRestart && data === null && error === "" ? h("p", { className: "am-hint" }, t("page.loading")) : null,
 				tab === "roles" && !needRestart && data !== null && roleNames.length === 0 && error === "" ? h(Empty, { glyph: "\u25c6", text: t("subagents.empty") }) : null,
 			tab === "roles" ? (
-					h("div", { className: "am-list" },
-						roleNames.map(function (nameKey) {
-							var role = roles[nameKey];
+				h("div", { className: "am-list" },
+					groupsOf(roleNames).map(function (group) {
+						var groupKey = group.label === null ? "\u0000" : group.label;
+						var isOpen = openGroups !== null && openGroups[groupKey] === true;
+						return h("div", { key: groupKey, className: "am-role-group" },
+							h("button", {
+								type: "button", className: "am-role-group-head",
+								"aria-expanded": isOpen ? "true" : "false",
+								"aria-label": (isOpen ? t("subagents.group.collapse") : t("subagents.group.expand")) + " " + (group.label === null ? t("subagents.group.other") : group.label),
+								onClick: function () {
+									setOpenGroups(function (current) {
+										var next = Object.assign({}, current === null ? {} : current);
+										if (next[groupKey] === true) delete next[groupKey];
+										else next[groupKey] = true;
+										return next;
+									});
+								}
+							},
+								h("span", { className: "am-role-group-chev", "aria-hidden": "true" }, "\u203A"),
+								h("span", { className: "am-role-group-title" }, group.label === null ? t("subagents.group.other") : group.label),
+								h("span", { className: "am-role-group-count" }, format(t("subagents.group.count"), { n: group.names.length }))
+							),
+							isOpen ? group.names.map(function (nameKey) {
+								var role = roles[nameKey];
 							var enabledNow = role.enabled !== false;
 							var candidateCount = role.models ? role.models.length : 0;
 							var builtinState = builtinInfo[nameKey];
@@ -4471,8 +4537,10 @@ window.__ModuleLoader__.load({
 									})
 								) : null
 							);
-						})
-					)
+						}) : null
+					);
+				})
+				)
 				) : null,
 
 				// Hidden built-ins: deleting one only writes a hide marker, so it

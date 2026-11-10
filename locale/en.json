@@ -242,7 +242,12 @@
     "pool.importAll": "Auto-sync settings-page models",
     "pool.importAll.hint": "Opening the model pool automatically lays in every Settings → Models model you are missing; you only fill in usage descriptions.",
     "pool.importAll.done": "Auto-synced {n} new model(s) into the pool — fill in their usages",
-    "pool.importAll.empty": "No syncable models on the settings page"
+    "pool.importAll.empty": "No syncable models on the settings page",
+    "field.category": "Group (optional)",
+    "group.other": "Ungrouped",
+    "group.count": "{n} roles",
+    "group.expand": "Expand",
+    "group.collapse": "Collapse"
   },
   "retry": {
     "pageTitle": "Auto Retry",

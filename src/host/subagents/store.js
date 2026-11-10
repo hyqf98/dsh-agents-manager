@@ -162,6 +162,12 @@ export function normalizeRole(raw, options = {}) {
     enabled: source.enabled === undefined ? true : source.enabled === true,
     models,
   };
+  // Optional user-facing grouping label; the client folds role cards by it.
+  if (source.category !== undefined && source.category !== null) {
+    if (typeof source.category !== 'string') return { ok: false, error: 'bad-category' };
+    const category = source.category.trim().slice(0, 40);
+    if (category !== '') role.category = category;
+  }
   if (source.promptPrefix !== undefined && source.promptPrefix !== null) {
     if (typeof source.promptPrefix !== 'string') return { ok: false, error: 'bad-prompt-prefix' };
     if (source.promptPrefix.trim() !== '') role.promptPrefix = source.promptPrefix;
