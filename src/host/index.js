@@ -217,7 +217,7 @@ export function apply(ctx) {
       // The processes row's per-agent service-detect listeners (layers 1-2)
       // and any other contribution-carried tools (the report tool rides
       // contributions() because it pairs with the detect hooks).
-      for (const contribution of coreServiceFeatures().contributions()) {
+      for (const contribution of coreServiceFeatures()) {
         for (const definition of (contribution?.tools ?? [])) {
           try {
             if (typeof tools.get === 'function' && tools.get(definition.name) !== undefined) {

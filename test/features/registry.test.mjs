@@ -108,3 +108,50 @@ test('registry: register, live contributions, unregister', () => {
   assert.deepEqual(registry.toolDefinitions(null), []);
   assert.deepEqual(registry.apiServices(), {});
 });
+
+
+test('core + processes row registers report_service_process on the agent binding', async () => {
+  const { apply: applyCore } = await import('../../src/host/index.js');
+  const { apply: applyProcesses } = await import('../../src/host/features/processes.js');
+
+  let coreService = null;
+  /** @type {Record<string, Array<(payload: object) => void>>} */
+  const onHandlers = {};
+  const makeCtx = (name) => ({
+    logger: { warn: (message) => { throw new Error(`unexpected warn from ${name}: ${String(message)}`); } },
+    on: (evt, fn) => { (onHandlers[evt] ??= []).push(fn); return () => {}; },
+    effect: (fn) => { try { fn(); } catch { /* effects are advisory here */ } return () => {}; },
+    provide: (id, svc) => { if (id === 'agents-manager:core') coreService = svc; },
+    inject: (names, fn) => {
+      if (names.includes('agents-manager:core')) fn({ get: (n) => (n === 'agents-manager:core' ? coreService : undefined) });
+      else fn({ get: () => undefined });
+    },
+  });
+
+  applyCore(makeCtx('core'));
+  applyProcesses(makeCtx('processes'));
+  assert.deepEqual(coreService.features.activeFeatures(), ['processes']);
+
+  const registered = [];
+  const toolsSvc = {
+    register: (definition) => { registered.push(definition.name); return () => {}; },
+    guard: () => () => {},
+    get: () => undefined,
+  };
+  const detectEvents = [];
+  const agent = {
+    id: 'sess-1',
+    session: { id: 'sess-1' },
+    ctx: {
+      get: (n) => (n === 'tools' ? toolsSvc : undefined),
+      effect: (fn) => { try { fn(); } catch { /* advisory */ } return () => {}; },
+      on: (evt) => { detectEvents.push(evt); return () => {}; },
+    },
+  };
+  for (const fn of onHandlers['agent/created'] ?? []) fn({ agent });
+
+  // The report tool rides the raw contribution bundle (not toolDefinitions);
+  // this is exactly the wiring both historical breakages lived in.
+  assert.ok(registered.includes('report_service_process'), `report tool registered (got: ${registered.join(',') || 'none'})`);
+  assert.deepEqual([...new Set(detectEvents)].sort(), ['tools/post-execute', 'tools/pre-execute']);
+});
