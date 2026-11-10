@@ -84,14 +84,17 @@
     },
     "import.sync": "Sync other agents",
     "import.sync.title": "Sync MCP config from other agents",
-    "import.sync.hint": "Auto-detects Claude Code, Codex, zcode, and Cursor MCP configs on this machine; checked items are imported (same-name overwritten).",
+    "import.sync.hint": "Auto-detects MCP configs of Claude Code / Claude Desktop / Codex / zcode / Cursor / opencode / Gemini CLI / Qwen Code / MiMo Code / Windsurf / VS Code / Cline / Trae on this machine; check and import (same-name overwrites).",
     "import.sync.none": "No importable MCP config detected",
     "import.sync.count": "{n} server(s)",
     "import.sync.needRestart": "Sync needs the updated host module: fully quit and restart DeepSeek Harness (not just a page refresh), then retry.",
     "import.sync.all": "All",
     "import.sync.noneSel": "None",
     "more": "More",
-    "more.title": "More actions"
+    "more.title": "More actions",
+    "field.description": "Description (for the AI)",
+    "field.description.hint": "Injected into every tool description of this server so the AI knows when to use it",
+    "description.empty": "No description"
   },
   "skills": {
     "count": "{n} skill(s)",

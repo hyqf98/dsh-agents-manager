@@ -1,14 +1,18 @@
 /**
- * One-click MCP sync from other coding agents: locate and parse the MCP
- * configuration of Claude Code, Codex, zcode, and Cursor on this machine.
+ * One-click MCP sync from other coding agents and AI desktop apps: locate and
+ * parse the MCP configuration of Claude Code, Claude Desktop, Codex, zcode,
+ * Cursor, opencode, Gemini CLI, Qwen Code, MiMo Code, Windsurf, VS Code,
+ * Cline, and Trae on this machine.
  *
- * Paths resolve from the OS home directory, so detection works on macOS,
- * Linux, and Windows alike. Parsing is read-only; nothing is written back to
- * any of these files.
+ * Paths resolve from the OS home directory with per-platform layouts
+ * (~/.config vs ~/Library/Application Support vs %APPDATA%), so detection
+ * works on macOS, Linux, and Windows alike. Parsing is read-only; nothing is
+ * written back to any of these files.
  *
  * @module
  */
 import { readFile } from 'node:fs/promises';
+import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { normalizeServer, NAME_PATTERN } from './config.js';
 
@@ -61,6 +65,67 @@ function toEntries(rawServers, known) {
   });
 }
 
+/**
+ * Strip JSONC noise (// and /* comments, trailing commas) that some agents
+ * (opencode .jsonc, MiMo Code mimocode.jsonc, VS Code mcp.json) allow in
+ * otherwise-JSON files. Conservative: never touches content inside strings.
+ *
+ * @param {string} text - raw file content.
+ * @returns {string} JSON-parseable text.
+ */
+function stripJsonc(text) {
+  let out = '';
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (quote !== '') {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      while (i < text.length && text[i] !== '\n' && text[i] !== '\r') i += 1;
+      i -= 1; // let the loop re-read the newline
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i + 1 < text.length && !(text[i] === '*' && text[i + 1] === '/')) i += 1;
+      i += 1; // skip past the closing slash
+      continue;
+    }
+    out += ch;
+  }
+  // Trailing commas before } or ] (tolerated by JSONC, illegal in JSON).
+  return out.replace(/,([\s\r\n]*[}\]])/g, '$1');
+}
+
+/** Read and parse one JSON or JSONC file; comment-tolerant. */
+async function readJsonTolerant(path) {
+  let text;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { ok: false, error: 'missing' };
+    return { ok: false, error: `read-failed:${code ?? 'unknown'}` };
+  }
+  try {
+    return { ok: true, value: JSON.parse(stripJsonc(text)) };
+  } catch (error) {
+    return { ok: false, error: `bad-json:${/** @type {Error} */ (error).message}` };
+  }
+}
+
 /** MCP servers of Claude Code: global `mcpServers` in ~/.claude.json. */
 async function readClaude(path, known) {
   const read = await readJson(path);
@@ -86,6 +151,133 @@ async function readCursor(path, known) {
   const servers = read.value?.mcpServers;
   if (servers === undefined || typeof servers !== 'object') return { entries: [], error: null };
   return { entries: toEntries(servers, known), error: null };
+}
+
+/**
+ * MCP servers of opencode (~/.config/opencode/opencode.json[c]): the `mcp`
+ * object with local (`type: "local"`, `command` array, `environment`) and
+ * remote (`type: "remote"`, `url`, `headers`) shapes.
+ */
+async function readOpencode(path, known) {
+  const read = await readJsonTolerant(path);
+  if (!read.ok) return { entries: [], error: read.error === 'missing' ? null : read.error };
+  const servers = read.value?.mcp;
+  if (servers === undefined || typeof servers !== 'object' || Array.isArray(servers)) return { entries: [], error: null };
+  const converted = {};
+  for (const [name, raw] of Object.entries(servers)) {
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      const map = /** @type {Record<string, unknown>} */ (raw);
+      if (Array.isArray(map.command)) {
+        // [cmd, ...args] → command string + args; environment → env.
+        const [command, ...args] = map.command.map(String);
+        converted[name] = {
+          command,
+          ...(args.length > 0 ? { args } : {}),
+          ...(map.environment !== undefined && map.environment !== null && typeof map.environment === 'object' ? { env: map.environment } : {}),
+        };
+        continue;
+      }
+    }
+    converted[name] = raw; // remote: url/headers already our shape
+  }
+  return { entries: toEntries(converted, known), error: null };
+}
+
+/**
+ * MCP servers of Gemini CLI (~/.gemini/settings.json): `mcpServers` with
+ * stdio (`command` string + `args`) and http (`url` / `httpUrl`).
+ */
+async function readGemini(path, known) {
+  const read = await readJsonTolerant(path);
+  if (!read.ok) return { entries: [], error: read.error === 'missing' ? null : read.error };
+  const servers = read.value?.mcpServers;
+  if (servers === undefined || typeof servers !== 'object') return { entries: [], error: null };
+  // Gemini http servers may spell the endpoint `httpUrl`/`httpUrlToJson`; our
+  // normalizeServer only knows `url`, so alias before entry conversion.
+  const aliased = {};
+  for (const [name, raw] of Object.entries(servers)) {
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      const map = /** @type {Record<string, unknown>} */ (raw);
+      if (typeof map.url !== 'string' && typeof map.httpUrl === 'string') {
+        aliased[name] = { ...map, url: map.httpUrl };
+        continue;
+      }
+    }
+    aliased[name] = raw;
+  }
+  return { entries: toEntries(aliased, known), error: null };
+}
+
+/** MCP servers of Qwen Code (~/.qwen/settings.json): `mcpServers`, Claude shape. */
+async function readQwen(path, known) {
+  const read = await readJsonTolerant(path);
+  if (!read.ok) return { entries: [], error: read.error === 'missing' ? null : read.error };
+  const servers = read.value?.mcpServers;
+  if (servers === undefined || typeof servers !== 'object') return { entries: [], error: null };
+  return { entries: toEntries(servers, known), error: null };
+}
+
+/**
+ * MCP servers of MiMo Code (~/.config/mimocode/mimocode.json[c]): the `mcp`
+ * object with `type: "local"` (`command` array + `environment`) and
+ * `type: "remote"` (`url` + `headers`).
+ */
+async function readMimo(path, known) {
+  const read = await readJsonTolerant(path);
+  if (!read.ok) return { entries: [], error: read.error === 'missing' ? null : read.error };
+  const servers = read.value?.mcp;
+  if (servers === undefined || typeof servers !== 'object' || Array.isArray(servers)) return { entries: [], error: null };
+  const converted = {};
+  for (const [name, raw] of Object.entries(servers)) {
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      const map = /** @type {Record<string, unknown>} */ (raw);
+      if (map.type === 'local' && Array.isArray(map.command)) {
+        // [cmd, ...args] → command string + args; environment → env.
+        const [command, ...args] = map.command.map(String);
+        converted[name] = {
+          command,
+          ...(args.length > 0 ? { args } : {}),
+          ...(map.environment !== undefined && map.environment !== null && typeof map.environment === 'object' ? { env: map.environment } : {}),
+        };
+        continue;
+      }
+      if (map.type === 'local' && typeof map.command === 'string') {
+        converted[name] = {
+          command: map.command,
+          ...(map.environment !== undefined && map.environment !== null && typeof map.environment === 'object' ? { env: map.environment } : {}),
+        };
+        continue;
+      }
+    }
+    converted[name] = raw; // remote/others: url/headers already our shape
+  }
+  return { entries: toEntries(converted, known), error: null };
+}
+
+/**
+ * MCP servers of VS Code (user mcp.json) and Trae (~/.config/Trae/mcp.json):
+ * `servers` with `type: "stdio"` (`command` string + `args`) and
+ * `type: "http"` (`url`); also accepts Claude-shaped `mcpServers`.
+ */
+async function readVscode(path, known) {
+  const read = await readJsonTolerant(path);
+  if (!read.ok) return { entries: [], error: read.error === 'missing' ? null : read.error };
+  const raw = read.value?.servers ?? read.value?.mcpServers;
+  if (raw === undefined || typeof raw !== 'object') return { entries: [], error: null };
+  const converted = {};
+  for (const [name, entry] of Object.entries(raw)) {
+    if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+      const map = /** @type {Record<string, unknown>} */ (entry);
+      // VS Code http servers spell the endpoint `url` already; stdio matches
+      // Claude shape. Only `type` values need mapping to our transports.
+      const type = typeof map.type === 'string' ? map.type.toLowerCase() : '';
+      if (type === 'http' || type === 'sse') converted[name] = { ...map, transport: 'streamable-http' };
+      else converted[name] = map; // stdio / absent: normalizeServer infers
+      continue;
+    }
+    converted[name] = entry;
+  }
+  return { entries: toEntries(converted, known), error: null };
 }
 
 /**
@@ -195,8 +387,74 @@ async function readCodex(path, known) {
 }
 
 /**
+ * Per-platform config-directory resolution: XDG-style ~/.config on Linux,
+ * ~/Library/Application Support on macOS, %APPDATA% on Windows. Bare-home
+ * layouts (~/.gemini, ~/.cursor) stay home-relative on every platform.
+ *
+ * @param {string} home - user home directory.
+ * @param {string} posixName - dot-directory under the home (Linux style).
+ * @param {string} macosName - folder inside Application Support.
+ * @param {string} windowsName - folder inside %APPDATA%.
+ * @returns {string} the platform-appropriate config directory.
+ */
+function configDir(home, posixName, macosName, windowsName) {
+  const pf = platform();
+  if (pf === 'win32') return join(home, 'AppData', 'Roaming', windowsName);
+  if (pf === 'darwin') return join(home, 'Library', 'Application Support', macosName);
+  const xdg = process.env.XDG_CONFIG_HOME;
+  return typeof xdg === 'string' && xdg !== '' ? join(xdg, posixName) : join(home, '.config', posixName);
+}
+
+/** The Claude Desktop config path per platform (MSIX installs redirect Roaming). */
+function claudeDesktopPaths(home) {
+  const pf = platform();
+  if (pf === 'win32') {
+    return [
+      join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json'),
+      // MSIX virtualization: LocalCache\Roaming mirrors Roaming for Store installs.
+      join(home, 'AppData', 'Local', 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache', 'Roaming', 'Claude', 'claude_desktop_config.json'),
+    ];
+  }
+  if (pf === 'darwin') {
+    return [join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')];
+  }
+  return [
+    join(configDir(home, 'Claude', 'Claude', 'Claude'), 'claude_desktop_config.json'),
+  ];
+}
+
+/** The VS Code user-level mcp.json path per platform (stable + Insiders). */
+function vscodeMcpPaths(home) {
+  const pf = platform();
+  if (pf === 'win32') return [
+    join(home, 'AppData', 'Roaming', 'Code', 'User', 'mcp.json'),
+    join(home, 'AppData', 'Roaming', 'Code - Insiders', 'User', 'mcp.json'),
+  ];
+  if (pf === 'darwin') return [
+    join(home, 'Library', 'Application Support', 'Code', 'User', 'mcp.json'),
+    join(home, 'Library', 'Application Support', 'Code - Insiders', 'User', 'mcp.json'),
+  ];
+  return [
+    join(home, '.config', 'Code', 'User', 'mcp.json'),
+    join(home, '.config', 'Code - Insiders', 'User', 'mcp.json'),
+  ];
+}
+
+/** The Cline global mcp settings path (VS Code global-storage based). */
+function clinePaths(home) {
+  const pf = platform();
+  const suffix = join('globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json');
+  if (pf === 'win32') return [join(home, 'AppData', 'Roaming', 'Code', 'User', suffix)];
+  if (pf === 'darwin') return [join(home, 'Library', 'Application Support', 'Code', 'User', suffix)];
+  return [join(home, '.config', 'Code', 'User', suffix)];
+}
+
+/**
  * Detect every known agent config under one home directory and parse its MCP
- * servers. Sources are returned in a stable order regardless of existence.
+ * servers. Sources are returned in a stable order regardless of existence;
+ * a source with multiple candidate paths reports the first one that exists
+ * (or the first path when none do). One resolution path only: the loop below
+ * probes every candidate and reads the first hit.
  *
  * @param {object} [options]
  * @param {string} [options.home] - home directory; defaults to os.homedir().
@@ -204,22 +462,75 @@ async function readCodex(path, known) {
  * @returns {Promise<Array<{ id: string, label: string, path: string, exists: boolean, error: string | null, entries: Array<object> }>>}
  */
 export async function detectAgentSources(options = {}) {
-  const home = options.home ?? (await import('node:os')).homedir();
+  const home = options.home ?? homedir();
   const known = options.knownServers ? await options.knownServers() : {};
-  const readers = [
-    { id: 'claude-code', label: 'Claude Code', path: join(home, '.claude.json'), read: readClaude },
-    { id: 'codex', label: 'Codex', path: join(home, '.codex', 'config.toml'), read: readCodex },
-    { id: 'zcode', label: 'zcode', path: join(home, '.zcode', 'cli', 'config.json'), read: readZcode },
-    { id: 'cursor', label: 'Cursor', path: join(home, '.cursor', 'mcp.json'), read: readCursor },
+
+  /**
+   * A source spec: candidate paths + a reader. Readers get (path, known) and
+   * answer { entries, error }.
+   *
+   * @type {Array<{ id: string, label: string, paths: () => string[], read: (path: string, known: Record<string, object>) => Promise<{ entries: Array<object>, error: string | null }> }>}
+   */
+  const sources = [
+    { id: 'claude-code', label: 'Claude Code', paths: () => [join(home, '.claude.json')], read: readClaude },
+    {
+      id: 'claude-desktop',
+      label: 'Claude Desktop',
+      paths: () => claudeDesktopPaths(home),
+      read: readClaude,
+    },
+    { id: 'codex', label: 'Codex', paths: () => [join(home, '.codex', 'config.toml')], read: readCodex },
+    { id: 'zcode', label: 'zcode', paths: () => [join(home, '.zcode', 'cli', 'config.json')], read: readZcode },
+    { id: 'cursor', label: 'Cursor', paths: () => [join(home, '.cursor', 'mcp.json')], read: readCursor },
+    {
+      id: 'opencode',
+      label: 'opencode',
+      paths: () => [join(configDir(home, 'opencode', 'opencode', 'opencode'), 'opencode.json'), join(configDir(home, 'opencode', 'opencode', 'opencode'), 'opencode.jsonc')],
+      read: readOpencode,
+    },
+    { id: 'gemini-cli', label: 'Gemini CLI', paths: () => [join(home, '.gemini', 'settings.json')], read: readGemini },
+    { id: 'qwen-code', label: 'Qwen Code', paths: () => [join(home, '.qwen', 'settings.json')], read: readQwen },
+    {
+      id: 'mimo-code',
+      label: 'MiMo Code',
+      paths: () => [
+        join(configDir(home, 'mimocode', 'mimocode', 'mimocode'), 'mimocode.json'),
+        join(configDir(home, 'mimocode', 'mimocode', 'mimocode'), 'mimocode.jsonc'),
+      ],
+      read: readMimo,
+    },
+    { id: 'windsurf', label: 'Windsurf', paths: () => [join(home, '.codeium', 'windsurf', 'mcp_config.json')], read: readClaude },
+    {
+      id: 'vscode',
+      label: 'VS Code',
+      paths: () => vscodeMcpPaths(home),
+      read: readVscode,
+    },
+    {
+      id: 'cline',
+      label: 'Cline',
+      paths: () => clinePaths(home),
+      read: readClaude,
+    },
+    {
+      id: 'trae',
+      label: 'Trae',
+      paths: () => [join(configDir(home, 'Trae', 'Trae', 'Trae'), 'mcp.json')],
+      read: readVscode,
+    },
   ];
-  return Promise.all(readers.map(async (reader) => {
-    const result = await reader.read(reader.path, known);
-    const exists = result.entries.length > 0 || (await fileExists(reader.path));
+
+  return Promise.all(sources.map(async (source) => {
+    const candidates = source.paths();
+    const existsList = await Promise.all(candidates.map((p) => fileExists(p)));
+    const hitIndex = existsList.indexOf(true);
+    const path = candidates[hitIndex >= 0 ? hitIndex : 0];
+    const result = await source.read(path, known);
     return {
-      id: reader.id,
-      label: reader.label,
-      path: reader.path,
-      exists,
+      id: source.id,
+      label: source.label,
+      path,
+      exists: hitIndex >= 0,
       error: result.error !== null && result.error !== 'missing' ? result.error : null,
       entries: result.entries,
     };

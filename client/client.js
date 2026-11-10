@@ -72,6 +72,9 @@ window.__ModuleLoader__.load({
 			"mcp.field.headers": "请求头",
 			"mcp.field.timeout": "工具调用超时（毫秒）",
 			"mcp.field.enabled": "启用",
+			"mcp.field.description": "描述（给 AI 看）",
+			"mcp.field.description.hint": "这行说明会注入到该服务器每个 MCP 工具的描述里，AI 据此判断何时用它",
+			"mcp.description.empty": "无描述",
 			"mcp.toggle": "启用 / 停用",
 			"mcp.toggleOn": "已启用，点击停用",
 			"mcp.toggleOff": "已停用，点击启用",
@@ -450,6 +453,9 @@ window.__ModuleLoader__.load({
 			"mcp.field.headers": "Headers",
 			"mcp.field.timeout": "Tool call timeout (ms)",
 			"mcp.field.enabled": "Enabled",
+			"mcp.field.description": "Description (for the AI)",
+			"mcp.field.description.hint": "Injected into every tool description of this server so the AI knows when to use it",
+			"mcp.description.empty": "No description",
 			"mcp.toggle": "Enable / disable",
 			"mcp.toggleOn": "Enabled, click to disable",
 			"mcp.toggleOff": "Disabled, click to enable",
@@ -492,7 +498,7 @@ window.__ModuleLoader__.load({
 			"mcp.import.agentsMissing": "~/.agents/mcp.json is missing or unreadable",
 			"mcp.import.sync": "Sync other agents",
 			"mcp.import.sync.title": "Sync MCP config from other agents",
-			"mcp.import.sync.hint": "Auto-detects Claude Code, Codex, zcode, and Cursor MCP configs on this machine; checked items are imported (same-name overwritten).",
+			"mcp.import.sync.hint": "Auto-detects MCP configs of Claude Code / Claude Desktop / Codex / zcode / Cursor / opencode / Gemini CLI / Qwen Code / MiMo Code / Windsurf / VS Code / Cline / Trae on this machine; check and import (same-name overwrites).",
 			"mcp.import.sync.none": "No importable MCP config detected",
 			"mcp.import.sync.needRestart": "Sync needs the updated host module: fully quit and restart DeepSeek Harness (not just a page refresh), then retry.",
 			"mcp.import.sync.count": "{n} server(s)",
@@ -1807,6 +1813,9 @@ window.__ModuleLoader__.load({
 			var enabled = useState(original.enabled === undefined ? true : original.enabled === true);
 			var setEnabled = enabled[1];
 			enabled = enabled[0];
+			var description = useState(typeof original.description === "string" ? original.description : "");
+			var setDescription = description[1];
+			description = description[0];
 			var error = useState("");
 			var setError = error[1];
 			error = error[0];
@@ -1869,6 +1878,7 @@ window.__ModuleLoader__.load({
 					var parsed = Number(timeout.trim());
 					if (Number.isInteger(parsed) && parsed >= 1000 && parsed <= 600000) server.toolCallTimeoutMs = parsed;
 				}
+				if (description.trim() !== "") server.description = description.trim();
 				setBusy(true);
 				api.saveServer(name.trim(), server).then(function (response) {
 					setBusy(false);
@@ -1932,6 +1942,9 @@ window.__ModuleLoader__.load({
 						h(Field, { label: t("mcp.field.timeout") },
 							h("input", { className: "am-input", value: timeout, onChange: function (event) { setTimeout_(event.target.value); }, placeholder: "60000" })
 						)
+					),
+					h(Field, { label: t("mcp.field.description"), hint: t("mcp.field.description.hint") },
+						h("input", { className: "am-input", value: description, onChange: function (event) { setDescription(event.target.value); }, placeholder: t("mcp.field.description"), maxLength: 500 })
 					),
 					h("label", { className: "am-check" },
 						h("input", { type: "checkbox", checked: enabled, onChange: function (event) { setEnabled(event.target.checked); } }),
@@ -2187,6 +2200,7 @@ window.__ModuleLoader__.load({
 					})
 				),
 				h("div", { className: "am-card-body" },
+					typeof server.description === "string" && server.description !== "" ? h("span", { className: "am-hint", title: server.description }, server.description) : null,
 					h("span", { className: "am-tool-name", title: summary }, summary),
 					envKeys.length > 0 || headerKeys.length > 0 ? h("span", null,
 						envKeys.map(function (key) { return h("span", { key: "e-" + key, className: "am-badge", style: { marginRight: "4px" } }, key + "=" + maskValue(server.env[key])); }),

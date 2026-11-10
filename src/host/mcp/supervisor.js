@@ -251,9 +251,17 @@ export function createSupervisor(options = {}) {
   function definitionsFor(name) {
     const entry = pool.get(name);
     if (entry === undefined || entry.state !== 'connected') return [];
+    // The user-authored server note rides every tool description: the model
+    // reads it wherever it reads what a tool does (registry, pickers), so a
+    // one-line "what is this MCP for" becomes part of the tool contract.
+    const note = typeof entry.server.description === 'string' && entry.server.description !== ''
+      ? `[${name}] ${entry.server.description}`
+      : null;
     return entry.tools.map((tool) => ({
       name: tool.publicName,
-      description: tool.description === '' ? `MCP tool ${name}/${tool.name}` : tool.description,
+      description: note === null
+        ? (tool.description === '' ? `MCP tool ${name}/${tool.name}` : tool.description)
+        : `${note} — ${tool.description === '' ? `MCP tool ${name}/${tool.name}` : tool.description}`,
       parameters: tool.inputSchema,
       output: {
         schema: {

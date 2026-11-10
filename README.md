@@ -6,7 +6,7 @@ DeepSeek Harness (DSH) 插件：在设置页可视化 管理 **MCP 服务器**�
 
 | 能力域 | 入口 | 功能点 |
 |---|---|---|
-| MCP 服务器 | 设置 → MCP 和技能 → MCP 服务器 | 统一存储/文件兜底双层数据 · 读取 `~/.agents/mcp.json` 只读导入 · 一键同步 Claude Code / Codex / zcode / Cursor · 粘贴导入（解析预览+可选预测试） · stdio/streamable-http 表单配置 · 单测/全部测试连接 · 工具详情弹窗（方法级测试调用） · 启动自检 + 失败 toast · 卡片编辑/删除/启停 |
+| MCP 服务器 | 设置 → MCP 和技能 → MCP 服务器 | 统一存储/文件兜底双层数据 · 读取 `~/.agents/mcp.json` 只读导入 · 一键同步 Claude Code / Claude Desktop / Codex / zcode / Cursor / opencode / Gemini CLI / Qwen Code / MiMo Code / Windsurf / VS Code / Cline / Trae（13 来源跨平台） · 粘贴导入（解析预览+可选预测试） · stdio/streamable-http 表单配置 · 单测/全部测试连接 · 工具详情弹窗（方法级测试调用） · 启动自检 + 失败 toast · 卡片编辑/删除/启停 |
 | 技能 | 设置 → MCP 和技能 → 技能 | GitHub 安装（tar.gz + SKILL.md 自动识别） · 技能列表 · 页内编辑器（目录树悬停展开、Markdown 渲染、单击进入编辑、Ctrl/Cmd+S、sha256 冲突检测、二进制/超大只读） |
 | 子代理角色 | 设置 → 子代理（独立页） | 角色 → `delegate_<role>` 委派工具 · 候选模型链 + 自定义描述（主代理动态选模型） · 失败换模重试指引 · promptPrefix / agentPreset / maxTokens · 粘贴导入/导出 · provider 目录建议（可手填） · 宿主过旧时显示重启提示 |
 | 自动重试 | 设置 → 自动重试（独立页） | 内核 per-provider 重试策略可视编辑（路由卡按厂商显示，热生效） · 14 组厂商预设规则一键导入（智谱/GLM 5h+周限额、Claude、Codex、OpenAI、Kimi、DeepSeek、Gemini、Cline、Factory、Antigravity、网关过载、中文中转站） · 正则+提取器自定义规则（7 种等待提取） · 规则测试抽屉（粘贴真实报错即时验证） · 进行中等待/最近事件监控（跨重启保留，含未重试失败及原因） · AI 工具三件套（读状态/试规则/写规则） |
@@ -21,9 +21,24 @@ DeepSeek Harness (DSH) 插件：在设置页可视化 管理 **MCP 服务器**�
 
 - **配置主存储**：优先写入 DSH 提供的统一数据存储（`storageDomain` KV 域 `agents_manager`，zod 校验、写持久化优先、`domain/changed` 变更通知）；该服务未组合时自动落到 DSH 环境下的插件数据文件 `~/.dsh/agents-manager/mcp.json`。
 - **读取 `~/.agents/mcp.json`**（只读导入源，标准 `mcpServers` JSON 格式，兼容 Claude Code / Cursor）：主存储为空且该文件存在时，启动自动一次性导入（标记完成不重复）；也可在「粘贴配置」弹窗中点「读取 ~/.agents/mcp.json（N）」按需导入。本插件不写该文件。
-- **一键同步其他 Agent**：工具栏「⇄ 同步其他 Agent」自动检测并解析本机 **Claude Code**（`~/.claude.json` 的 `mcpServers`）、**Codex**（`~/.codex/config.toml` 的 `[mcp_servers.*]`，内置轻量 TOML 解析）、**zcode**（`~/.zcode/cli/config.json` 的 `mcp.servers`）、**Cursor**（`~/.cursor/mcp.json`），勾选导入（同名覆盖；名称自动清洗为安全字符；跨来源重名取先者）。路径基于系统 home 目录解析，macOS/Linux/Windows 通用。
+- **一键同步其他 Agent（13 个来源，跨平台路径）**：工具栏「⇄ 同步其他 Agent」自动检测并解析本机各 Agent 的 MCP 配置，勾选导入（同名覆盖；名称自动清洗为安全字符；跨来源重名取先者）：
+  - **Claude Code** `~/.claude.json` → `mcpServers`
+  - **Claude Desktop**：macOS `~/Library/Application Support/Claude/claude_desktop_config.json`；Windows `%APPDATA%\Claude\` 及 MSIX 重定向 `AppData\Local\Packages\Claude_*\LocalCache\Roaming\Claude\`；Linux `~/.config/Claude/`
+  - **Codex** `~/.codex/config.toml` → `[mcp_servers.*]`（内置轻量 TOML 解析）
+  - **zcode** `~/.zcode/cli/config.json` → `mcp.servers`
+  - **Cursor** `~/.cursor/mcp.json`
+  - **opencode** `~/.config/opencode/opencode.json[c]`（macOS `~/Library/Application Support/opencode/`）→ `mcp`，`type: local` 的 `command` 数组 + `environment` 自动转换为 stdio 形状；JSONC 注释/尾逗号容忍
+  - **Gemini CLI** `~/.gemini/settings.json` → `mcpServers`，`httpUrl` 自动别名到 `url`
+  - **Qwen Code** `~/.qwen/settings.json` → `mcpServers`
+  - **MiMo Code** `~/.config/mimocode/mimocode.json[c]` → `mcp`，`local`/`remote` 双形状转换
+  - **Windsurf** `~/.codeium/windsurf/mcp_config.json` → `mcpServers`
+  - **VS Code**（含 Insiders）用户级 `mcp.json` → `servers`（`type: http/sse` 映射为 streamable-http；macOS 在 `~/Library/Application Support/Code/User/`，Windows 在 `%APPDATA%\Code\User\`，Linux 在 `~/.config/Code/User/`）
+  - **Cline** VS Code globalStorage 下的 `cline_mcp_settings.json` → `mcpServers`
+  - **Trae** `~/.config/Trae/mcp.json`（macOS `~/Library/Application Support/Trae/`）
+  - 路径基于系统 home 目录 + 平台布局解析（XDG / Application Support / %APPDATA%），macOS/Linux/Windows 通用；全部只读，绝不回写。
 - **粘贴导入**：粘贴 JSON（`{"mcpServers": {...}}`、单个服务器对象或裸数组均可）→ 解析预览（冲突/无效标注，可选导入前逐条测试）→ 导入所选。兼容 zcode 等格式别名：`type` 字段（`stdio`/`http`/`sse`/`remote`）与 `timeoutMs` 自动归一。
 - **表单配置**：stdio（command/args/env/cwd）与 streamable-http（url/headers）两种传输，env/headers 键值对编辑，工具调用超时、启用开关。
+- **描述字段（给 AI 看）**：每个服务器可写一行用途说明（≤500 字），保存后**注入到该服务器每个 MCP 工具的描述前缀**（`[name] 说明 — 原描述`），模型在选择工具时就能读到"这个 MCP 是干什么的"；卡片上以灰色说明行展示，导入/编辑弹窗均可维护。
 - **stdio 子进程代理行为**：DSH 在代理策略激活时会向所有子进程注入 `NODE_USE_ENV_PROXY=1`（让 Node 子进程的 `fetch()` 走环境变量代理）——这会让连**内网**目标的 MCP 服务器被机器代理截断而连接失败。插件启动 stdio 型 MCP 服务器时默认剔除该注入，恢复 Node 默认直连（与 zcode 等其他 MCP 宿主一致）；`http_proxy`/`https_proxy`/`no_proxy` 原样透传供非 Node 服务器自取。确需让某个服务器走代理时，在其 env 配置里显式添加 `NODE_USE_ENV_PROXY=1`。
 - **服务器卡片**：状态点 + 状态徽标（已连接 / 失败 / 测试中 / 已停用 / 未测试），工具名旁显示「N 个工具」徽标；卡片尾部**启停开关**（一键启用/停用，请求即时返回不卡顿；连接建立期间开关显示加载转圈、状态点呼吸闪烁「连接中」，停用即断开并注销其工具）；状态点优先显示实时池状态（已连接/失败/连接中），无池信息时显示最近一次手动测试结果；操作按钮：编辑（回填表单弹窗）、删除（确认后移除）、测试（单服务器重连式测试）；工具栏提供「全部测试」批量自检。
 - **测试连接**：每个服务器一键测试（独立临时连接，10s 超时），返回成功/失败与工具清单；测试同时校准连接池状态（相当于手动重连）。**测试结果会同步反映到卡片状态点与状态徽标**（成功绿 / 失败红，池已连接时以池为准），并随 `/state` 带出——输入框底部「会话能力」选择器里的状态点同样显示最近测试结果（打开弹层即刷新）。

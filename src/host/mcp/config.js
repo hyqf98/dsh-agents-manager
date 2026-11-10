@@ -89,6 +89,13 @@ export function normalizeServer(raw) {
     }
     server.toolCallTimeoutMs = value;
   }
+  // User-authored note describing what this server is for; surfaced to the AI
+  // through the tool descriptions (see supervisor.definitionsFor) and to the
+  // UI on cards, the import dialog, and the session chip.
+  if (typeof source.description === 'string' && source.description.trim() !== '') {
+    const description = source.description.trim().slice(0, 500);
+    if (description !== '') server.description = description;
+  }
   server.enabled = source.enabled === undefined ? true : source.enabled === true;
   return { ok: true, server };
 }
